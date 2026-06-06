@@ -19,6 +19,7 @@ import com.factapp.jhonny.ui.clientes.ClientesScreen
 import com.factapp.jhonny.ui.configuracion.ConfiguracionScreen
 import com.factapp.jhonny.ui.compras.ComprasScreen
 import com.factapp.jhonny.ui.comprobantes.ComprobantesEmitidosScreen
+import com.factapp.jhonny.ui.inventario.InventarioSaldoScreen
 import com.factapp.jhonny.ui.inventario.SalidasScreen
 import com.factapp.jhonny.ui.inventario.RegistrarSalidaScreen
 import com.factapp.jhonny.ui.inventario.HistorialInventarioScreen
@@ -41,6 +42,7 @@ class MainActivity : FragmentActivity() {
     data object NuevaSalida : Pantalla
     data object Ingresos : Pantalla
     data object HistorialInventario : Pantalla
+    data object InventarioSaldo : Pantalla
     data object Almacenes : Pantalla
     data object Configuracion : Pantalla
     data class EmitirComprobante(val tipo: TipoComprobante) : Pantalla
@@ -105,6 +107,7 @@ class MainActivity : FragmentActivity() {
               onSalidas = { pantalla = Pantalla.Salidas },
               onIngresos = { pantalla = Pantalla.Ingresos },
               onHistorial = { pantalla = Pantalla.HistorialInventario },
+              onInventario = { pantalla = Pantalla.InventarioSaldo },
               onAlmacenes = { pantalla = Pantalla.Almacenes },
               onComprobantesEmitidos = {
                 pantallaAnterior = Pantalla.Dashboard
@@ -187,6 +190,14 @@ class MainActivity : FragmentActivity() {
 
           Pantalla.HistorialInventario -> {
             HistorialInventarioScreen(
+              modifier = Modifier.fillMaxSize(),
+              usuario = usuarioSesion,
+              onVolver = { pantalla = Pantalla.Dashboard },
+            )
+          }
+
+          Pantalla.InventarioSaldo -> {
+            InventarioSaldoScreen(
               modifier = Modifier.fillMaxSize(),
               usuario = usuarioSesion,
               onVolver = { pantalla = Pantalla.Dashboard },

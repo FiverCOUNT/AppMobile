@@ -14,4 +14,7 @@ interface UsuarioDao {
 
     @Query("SELECT * FROM usuarios ORDER BY last_updated DESC LIMIT 1")
     suspend fun obtenerSesionReciente(): Usuario?
+
+    @Query("DELETE FROM usuarios")
+    suspend fun eliminarTodos()
 }

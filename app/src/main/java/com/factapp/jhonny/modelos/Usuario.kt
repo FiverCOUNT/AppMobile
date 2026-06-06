@@ -22,7 +22,15 @@ data class Usuario(
     val lastUpdated: Timestamp,
     @ColumnInfo(name = "estado")
     val estado: EstadoUsuario,
+    @ColumnInfo(name = "rol", defaultValue = "USUARIO")
+    val rol: RolUsuario = RolUsuario.USUARIO,
+    @ColumnInfo(name = "almacen_id")
+    val almacenId: String? = null,
+    @ColumnInfo(name = "almacen_nombre")
+    val almacenNombre: String? = null,
     /** Empresa asociada; Room aplana sus columnas en `usuarios` (mismos nombres que en [Company]). */
     @Embedded
     val company: Company?,
 )
+
+fun Usuario.esAdmin(): Boolean = rol == RolUsuario.ADMIN

@@ -4,9 +4,9 @@ import android.content.Context
 import com.factapp.jhonny.FactApplication
 import com.factapp.jhonny.modelos.Company
 import com.factapp.jhonny.modelos.EstadoUsuario
+import com.factapp.jhonny.modelos.RolUsuario
 import com.factapp.jhonny.modelos.Usuario
 import com.factapp.jhonny.network.dto.model.BusinessTemplate
-import com.factapp.jhonny.network.dto.RUC_DEMO_CATALOGO
 import java.sql.Timestamp
 
 /**
@@ -14,6 +14,7 @@ import java.sql.Timestamp
  */
 object GuiSesionDemo {
 
+    private const val RUC_DEMO = "20100000001"
     private const val TOKEN_DEMO = "token-demo-offline"
     private const val EMPRESA_NOMBRE = "Comercial Demo SAC"
 
@@ -29,8 +30,9 @@ object GuiSesionDemo {
             refreshToken = null,
             lastUpdated = ahora,
             estado = EstadoUsuario.ACTIVO,
+            rol = RolUsuario.ADMIN,
             company = Company(
-                ruc = RUC_DEMO_CATALOGO,
+                ruc = RUC_DEMO,
                 nombre = EMPRESA_NOMBRE,
                 rutaFirma = null,
                 rutaLogo = null,

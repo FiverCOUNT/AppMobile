@@ -161,7 +161,6 @@ fun lineaCatalogoConSerie(
     catalogItem = catalogItem?.takeIf { it.id == serie.catalogItemId }
         ?: catalogItem,
     nombre = catalogItem?.nombre,
-    codigo = catalogItem?.codigo,
     descripcion = catalogItem?.descripcion,
     unidad = catalogItem?.unidad,
     precioUnitario = catalogItem?.precioUnitario,
@@ -452,7 +451,6 @@ fun LineaCatalogoItem.enriquecerConCatalogo(
         catalogItem = catalogItem,
         catalogItemId = catalogItem.id,
         nombre = nombre ?: catalogItem.nombre,
-        codigo = codigo ?: catalogItem.codigo,
         descripcion = descripcion ?: catalogItem.descripcion,
         unidad = unidad ?: catalogItem.unidad,
         precioUnitario = precioUnitario ?: catalogItem.precioUnitario,

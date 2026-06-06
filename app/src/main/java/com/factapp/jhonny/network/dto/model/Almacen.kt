@@ -15,4 +15,4 @@ data class Almacen(
 )
 
 val Almacen.direccion: String?
-    get() = address.lineaPrincipal
+    get() = address?.lineaPrincipal

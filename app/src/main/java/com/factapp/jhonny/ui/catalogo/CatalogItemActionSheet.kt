@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -21,6 +22,7 @@ private val Destructive = Color(0xFFC62828)
 fun CatalogItemActionSheet(
     item: CatalogItem?,
     onDismiss: () -> Unit,
+    onEditar: (CatalogItem) -> Unit,
     onToggleActivo: (CatalogItem) -> Unit,
     onEliminar: (CatalogItem) -> Unit,
 ) {
@@ -32,6 +34,16 @@ fun CatalogItemActionSheet(
         subtitle = item.nombre,
         theme = PartialSheetTheme.Emit,
     ) {
+        PartialOptionCard(
+            icon = Icons.Outlined.Edit,
+            titulo = "Editar ítem",
+            detalle = "Nombre, precio, tipo y unidad",
+            onClick = {
+                onEditar(item)
+                onDismiss()
+            },
+        )
+        Spacer(modifier = Modifier.height(10.dp))
         if (item.activo) {
             PartialOptionCard(
                 icon = Icons.Outlined.Block,

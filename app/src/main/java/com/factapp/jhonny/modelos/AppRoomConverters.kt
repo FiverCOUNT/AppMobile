@@ -15,6 +15,12 @@ class AppRoomConverters {
     fun estadoATexto(estado: EstadoUsuario): String = estado.name
 
     @TypeConverter
+    fun rolDesdeTexto(valor: String): RolUsuario = RolUsuario.valueOf(valor)
+
+    @TypeConverter
+    fun rolATexto(rol: RolUsuario): String = rol.name
+
+    @TypeConverter
     fun timestampDesdeLong(valor: Long): Timestamp = Timestamp(valor)
 
     @TypeConverter

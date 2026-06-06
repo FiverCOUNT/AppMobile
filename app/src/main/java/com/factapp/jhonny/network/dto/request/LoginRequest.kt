@@ -1,9 +1,5 @@
 package com.factapp.jhonny.network.dto.request
 
 /**
- * Cuerpo JSON del login (email + PIN de 6 digitos).
+ * Login: usar [LoginApiRequest] y [com.factapp.jhonny.network.AuthRepository.login].
  */
-data class LoginRequest(
-    val email: String,
-    val pin: String,
-)

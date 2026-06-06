@@ -38,7 +38,6 @@ fun List<CatalogItem>.filtrarPorBusqueda(query: String): List<CatalogItem> {
     val q = query.trim().lowercase()
     return filter { item ->
         item.nombre.lowercase().contains(q) ||
-            item.codigo?.lowercase()?.contains(q) == true ||
             item.descripcion?.lowercase()?.contains(q) == true ||
             item.tipo.etiqueta.lowercase().contains(q)
     }
@@ -97,7 +96,7 @@ fun CatalogoBusquedaBar(
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (value.isEmpty()) {
                             Text(
-                                text = "Buscar por nombre, código o tipo…",
+                                text = "Buscar por nombre o tipo…",
                                 color = C.textSecondary.copy(alpha = 0.75f),
                                 fontSize = 15.sp,
                             )

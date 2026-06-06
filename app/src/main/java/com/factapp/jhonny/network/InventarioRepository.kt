@@ -1,6 +1,7 @@
 package com.factapp.jhonny.network
 
 import com.factapp.jhonny.network.dto.model.Almacen
+import com.factapp.jhonny.network.dto.model.InventarioSaldo
 import com.factapp.jhonny.network.dto.request.CrearAlmacenRequest
 import com.factapp.jhonny.network.dto.model.Movimiento
 import com.factapp.jhonny.network.dto.model.MovimientoEstado
@@ -22,15 +23,55 @@ import java.time.Instant
  */
 object InventarioRepository {
 
+    suspend fun listarInventario(
+        companyRuc: String,
+        token: String?,
+        almacenId: String? = null,
+        catalogItemId: String? = null,
+        soloConStock: Boolean = true,
+    ): Result<List<InventarioSaldo>> {
+        if (companyRuc.isBlank()) {
+            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
+        }
+        if (token.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("Inicia sesión para consultar inventario"))
+        }
+        return try {
+            Result.success(
+                RetrofitClient.api.listarInventario(
+                    ruc = companyRuc,
+                    authorization = bearer(token),
+                    almacenId = almacenId?.takeIf { it.isNotBlank() },
+                    catalogItemId = catalogItemId?.takeIf { it.isNotBlank() },
+                    soloConStock = soloConStock,
+                ),
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun listarAlmacenes(
         companyRuc: String,
         token: String?,
-    ): Result<List<Almacen>> = llamar(
-        companyRuc = companyRuc,
-        token = token,
-        demo = { InventarioDemo.almacenesDemo(companyRuc) },
-    ) {
-        RetrofitClient.api.listarAlmacenes(companyRuc, bearer(token))
+        soloActivos: Boolean = true,
+    ): Result<List<Almacen>> {
+        if (companyRuc.isBlank()) {
+            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
+        }
+        if (token.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("Inicia sesión para consultar almacenes"))
+        }
+        return try {
+            val lista = RetrofitClient.api.listarAlmacenes(
+                ruc = companyRuc,
+                authorization = bearer(token),
+                soloActivos = soloActivos,
+            )
+            Result.success(lista.filter { it.activo || !soloActivos })
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun crearAlmacen(
@@ -45,14 +86,14 @@ object InventarioRepository {
             return Result.failure(IllegalArgumentException("Código y nombre son obligatorios"))
         }
         if (token.isNullOrBlank()) {
-            return Result.success(InventarioDemo.crearAlmacenDemo(companyRuc, body))
+            return Result.failure(IllegalStateException("Inicia sesión para crear almacenes"))
         }
         return try {
             Result.success(
                 RetrofitClient.api.crearAlmacen(companyRuc, bearer(token), body),
             )
-        } catch (_: Exception) {
-            Result.success(InventarioDemo.crearAlmacenDemo(companyRuc, body))
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

@@ -1,5 +1,7 @@
 package com.factapp.jhonny.network.dto.model
 
+import com.factapp.jhonny.network.dto.request.ActualizarCatalogItemRequest
+import com.factapp.jhonny.network.dto.request.CrearCatalogItemRequest
 import com.google.gson.annotations.SerializedName
 
 /**
@@ -41,3 +43,37 @@ data class CatalogItem(
 
 fun CatalogItem.descripcionEnComprobante(): String =
     descripcion?.takeIf { it.isNotBlank() } ?: nombre
+
+/** Body para `POST /api/empresas/{ruc}/catalogo`. */
+fun CatalogItem.toCrearRequest(): CrearCatalogItemRequest =
+    CrearCatalogItemRequest(
+        kind = kind,
+        codigo = codigo,
+        nombre = nombre,
+        descripcion = descripcion,
+        unidad = unidad,
+        precioUnitario = precioUnitario,
+        afectacionIgv = afectacionIgv,
+        activo = activo,
+        manejaStock = manejaStock,
+        manejaSerie = manejaSerie,
+        stockActual = stockActual,
+        duracionMinutos = duracionMinutos,
+    )
+
+/** Body para `PUT /api/empresas/{ruc}/catalogo/{id}`. */
+fun CatalogItem.toActualizarRequest(): ActualizarCatalogItemRequest =
+    ActualizarCatalogItemRequest(
+        kind = kind,
+        codigo = codigo,
+        nombre = nombre,
+        descripcion = descripcion,
+        unidad = unidad,
+        precioUnitario = precioUnitario,
+        afectacionIgv = afectacionIgv,
+        activo = activo,
+        manejaStock = manejaStock,
+        manejaSerie = manejaSerie,
+        stockActual = stockActual,
+        duracionMinutos = duracionMinutos,
+    )

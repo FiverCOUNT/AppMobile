@@ -97,7 +97,7 @@ private fun List<Almacen>.filtrarPorBusqueda(query: String): List<Almacen> {
     return filter { almacen ->
         almacen.nombre.lowercase().contains(q) ||
             almacen.codigo.lowercase().contains(q) ||
-            almacen.address.lineaPrincipal?.lowercase()?.contains(q) == true
+            almacen.address?.lineaPrincipal?.lowercase()?.contains(q) == true
     }
 }
 
@@ -583,7 +583,7 @@ private fun BodegaTarjetaMapa(
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    val direccionAlmacen = almacen.address.lineaPrincipal
+                    val direccionAlmacen = almacen.address?.lineaPrincipal
                     if (!direccionAlmacen.isNullOrBlank()) {
                         Row(verticalAlignment = Alignment.Top) {
                             Icon(

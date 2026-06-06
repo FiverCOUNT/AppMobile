@@ -129,7 +129,7 @@ fun SalidasScreen(
         CatalogRepository.listarParaGestion(companyRuc, token).onSuccess { catalogoLista = it }
         InventarioRepository.listarSalidas(companyRuc, token).onSuccess { salidas = it }
         InventarioRepository.listarAlmacenes(companyRuc, token).onSuccess { lista ->
-            almacenesMap = lista.ifEmpty { InventarioDemo.almacenesDemo(companyRuc) }.associateBy { it.id }
+            almacenesMap = lista.associateBy { it.id }
         }
     }
 
@@ -644,7 +644,7 @@ fun IngresosScreen(
         CatalogRepository.listarParaGestion(companyRuc, token).onSuccess { catalogoLista = it }
         InventarioRepository.listarIngresos(companyRuc, token).onSuccess { ingresos = it }
         InventarioRepository.listarAlmacenes(companyRuc, token).onSuccess { lista ->
-            almacenes = lista.ifEmpty { InventarioDemo.almacenesDemo(companyRuc) }
+            almacenes = lista
         }
     }
 
@@ -893,7 +893,7 @@ fun HistorialInventarioScreen(
                 .onSuccess { lista -> movimientos = lista }
                 .onFailure { error = it.message }
             InventarioRepository.listarAlmacenes(companyRuc, token).onSuccess { lista ->
-                almacenes = lista.ifEmpty { InventarioDemo.almacenesDemo(companyRuc) }
+                almacenes = lista
             }
         }
         cargando = false

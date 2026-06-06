@@ -26,8 +26,21 @@ class AddressTypeAdapter : JsonDeserializer<Address>, JsonSerializer<Address> {
             val texto = json.asString.trim()
             return texto.takeIf { it.isNotEmpty() }?.let { Address.linea(it) }
         }
-        return context.deserialize(json, Address::class.java)
+        if (!json.isJsonObject) return null
+        val obj = json.asJsonObject
+        return Address(
+            ubigeo = obj.stringOrNull("ubigeo"),
+            departamento = obj.stringOrNull("departamento"),
+            provincia = obj.stringOrNull("provincia"),
+            distrito = obj.stringOrNull("distrito"),
+            urbanizacion = obj.stringOrNull("urbanizacion"),
+            direccion = obj.stringOrNull("direccion"),
+            codLocal = obj.stringOrNull("cod_local"),
+        )
     }
+
+    private fun JsonObject.stringOrNull(key: String): String? =
+        get(key)?.takeIf { !it.isJsonNull }?.asString?.trim()?.takeIf { it.isNotEmpty() }
 
     override fun serialize(
         src: Address?,

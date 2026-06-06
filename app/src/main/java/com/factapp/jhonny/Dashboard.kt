@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Input
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Menu
@@ -101,6 +102,7 @@ fun DashboardScreen(
     onSalidas: () -> Unit = {},
     onIngresos: () -> Unit = {},
     onHistorial: () -> Unit = {},
+    onInventario: () -> Unit = {},
     onAlmacenes: () -> Unit = {},
     onComprobantesEmitidos: () -> Unit = {},
     onConfiguracion: () -> Unit = {},
@@ -247,6 +249,10 @@ fun DashboardScreen(
                     mostrarMenuMas = false
                     onHistorial()
                 },
+                onInventario = {
+                    mostrarMenuMas = false
+                    onInventario()
+                },
                 onAlmacenes = {
                     mostrarMenuMas = false
                     onAlmacenes()
@@ -262,6 +268,7 @@ private fun MenuMasOpciones(
     onSalidas: () -> Unit,
     onIngresos: () -> Unit,
     onHistorial: () -> Unit,
+    onInventario: () -> Unit,
     onAlmacenes: () -> Unit,
 ) {
     PartialOptionCard(
@@ -306,6 +313,17 @@ private fun MenuMasOpciones(
         iconBackground = Color(0xFFE1BEE7),
         tituloColor = Color(0xFF4A148C),
         onClick = onHistorial,
+    )
+    Spacer(modifier = Modifier.height(10.dp))
+    PartialOptionCard(
+        icon = Icons.Default.Inventory2,
+        titulo = "Inventario",
+        detalle = "Stock actual de productos por almacén",
+        theme = PartialSheetTheme.Dashboard,
+        iconTint = Color(0xFF4527A0),
+        iconBackground = Color(0xFFD1C4E9),
+        tituloColor = Color(0xFF311B92),
+        onClick = onInventario,
     )
     Spacer(modifier = Modifier.height(10.dp))
     PartialOptionCard(

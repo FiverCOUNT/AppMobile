@@ -56,7 +56,6 @@ fun CatalogoBuscarSheet(
         if (busqueda.isBlank()) return@filter true
         val q = busqueda.trim().lowercase()
         item.nombre.lowercase().contains(q) ||
-            item.codigo?.lowercase()?.contains(q) == true ||
             item.descripcion?.lowercase()?.contains(q) == true
     }
 
@@ -85,7 +84,7 @@ fun CatalogoBuscarSheet(
                     value = busqueda,
                     onValueChange = onBusquedaChange,
                     modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Nombre, código o descripción") },
+                    placeholder = { Text("Nombre o descripción") },
                     leadingIcon = {
                         Icon(Icons.Default.Search, contentDescription = null, tint = C.accent)
                     },
@@ -156,7 +155,6 @@ private fun CatalogoBuscarFila(
                 Text(
                     text = buildString {
                         append(item.tipo.etiqueta)
-                        item.codigo?.let { append(" · $it") }
                         item.etiquetaStock()?.let { append(" · $it") }
                     },
                     fontSize = 12.sp,

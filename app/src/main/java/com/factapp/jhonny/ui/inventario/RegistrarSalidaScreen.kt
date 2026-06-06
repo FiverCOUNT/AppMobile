@@ -183,7 +183,7 @@ fun RegistrarSalidaScreen(
         cargandoDatos = true
         withContext(Dispatchers.IO) {
             InventarioRepository.listarAlmacenes(companyRuc, token).onSuccess { lista ->
-                almacenes = lista.ifEmpty { InventarioDemo.almacenesDemo(companyRuc) }
+                almacenes = lista
             }
             ClienteRepository.listar(companyRuc, token).onSuccess { clientes = it }
         }

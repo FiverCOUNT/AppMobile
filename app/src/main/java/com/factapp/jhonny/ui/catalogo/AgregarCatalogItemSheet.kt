@@ -18,11 +18,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.RoomService
 import androidx.compose.material.icons.outlined.Info
@@ -55,6 +57,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,23 +74,32 @@ private val C = ComprobanteEmitColors
 fun AgregarCatalogItemSheet(
     visible: Boolean,
     companyRuc: String,
+    itemExistente: CatalogItem? = null,
     onDismiss: () -> Unit,
     onGuardar: (CatalogItem) -> Unit,
 ) {
     if (!visible) return
 
+    val esEdicion = itemExistente != null
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var nombre by remember { mutableStateOf("") }
-    var codigo by remember { mutableStateOf("") }
+    var precioTexto by remember { mutableStateOf("") }
     var esProducto by remember { mutableStateOf(true) }
     var unidadSeleccionada by remember { mutableStateOf(CatalogItemKind.PRODUCT.unidadPorDefecto()) }
 
-    val puedeGuardar = nombre.isNotBlank()
+    val precioUnitario = parsePrecioTexto(precioTexto)
+    val puedeGuardar = nombre.isNotBlank() && precioTexto.isNotBlank() && precioUnitario > 0.0
 
-    LaunchedEffect(visible) {
-        if (visible) {
+    LaunchedEffect(visible, itemExistente?.id) {
+        if (!visible) return@LaunchedEffect
+        if (itemExistente != null) {
+            nombre = itemExistente.nombre
+            precioTexto = formatPrecioParaCampo(itemExistente.precioUnitario)
+            esProducto = itemExistente.esProducto
+            unidadSeleccionada = itemExistente.unidad
+        } else {
             nombre = ""
-            codigo = ""
+            precioTexto = ""
             esProducto = true
             unidadSeleccionada = CatalogItemKind.PRODUCT.unidadPorDefecto()
         }
@@ -115,9 +127,13 @@ fun AgregarCatalogItemSheet(
                 .imePadding(),
         ) {
             ComprobanteEmitHeader(
-                titulo = "Nuevo ítem",
-                subtitulo = "Registra un producto o servicio en tu catálogo",
-                icono = Icons.Default.Add,
+                titulo = if (esEdicion) "Editar ítem" else "Nuevo ítem",
+                subtitulo = if (esEdicion) {
+                    "Actualiza los datos del producto o servicio"
+                } else {
+                    "Registra un producto o servicio en tu catálogo"
+                },
+                icono = if (esEdicion) Icons.Default.Edit else Icons.Default.Add,
                 mostrarDragHandle = true,
             )
 
@@ -176,10 +192,12 @@ fun AgregarCatalogItemSheet(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         NuevoItemCampo(
-                            value = codigo,
-                            onValueChange = { codigo = it },
-                            label = "Código interno",
-                            placeholder = "Opcional SN2025",
+                            value = precioTexto,
+                            onValueChange = { precioTexto = it.filterPrecioDecimal() },
+                            label = "Precio unitario",
+                            placeholder = "0.00",
+                            prefix = { Text("S/ ", color = C.accent, fontWeight = FontWeight.SemiBold) },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         NuevoItemSeccionTitulo("Unidad de medida")
@@ -227,21 +245,37 @@ fun AgregarCatalogItemSheet(
                     Button(
                         onClick = {
                             val kind = if (esProducto) CatalogItemKind.PRODUCT else CatalogItemKind.SERVICE
-                            val nuevo = CatalogItem(
-                                id = "local-${System.currentTimeMillis()}",
-                                companyRuc = companyRuc,
-                                kind = kind.name,
-                                codigo = codigo.takeIf { it.isNotBlank() },
-                                nombre = nombre.trim(),
-                                unidad = unidadSeleccionada,
-                                precioUnitario = 0.0,
-                                activo = true,
-                                manejaStock = esProducto,
-                                stockActual = null,
-                                duracionMinutos = if (!esProducto) 60 else null,
-                            )
-                            onGuardar(nuevo)
-                            onDismiss()
+                            val precio = parsePrecioTexto(precioTexto)
+                            val item = if (itemExistente != null) {
+                                itemExistente.copy(
+                                    kind = kind.name,
+                                    nombre = nombre.trim(),
+                                    precioUnitario = precio,
+                                    unidad = unidadSeleccionada,
+                                    manejaStock = if (esProducto) itemExistente.manejaStock else false,
+                                    manejaSerie = if (esProducto) itemExistente.manejaSerie else false,
+                                    stockActual = if (esProducto) itemExistente.stockActual else null,
+                                    duracionMinutos = if (!esProducto) {
+                                        itemExistente.duracionMinutos ?: 60
+                                    } else {
+                                        null
+                                    },
+                                )
+                            } else {
+                                CatalogItem(
+                                    id = "local-${System.currentTimeMillis()}",
+                                    companyRuc = companyRuc,
+                                    kind = kind.name,
+                                    nombre = nombre.trim(),
+                                    unidad = unidadSeleccionada,
+                                    precioUnitario = precio,
+                                    activo = true,
+                                    manejaStock = esProducto,
+                                    stockActual = null,
+                                    duracionMinutos = if (!esProducto) 60 else null,
+                                )
+                            }
+                            onGuardar(item)
                         },
                         enabled = puedeGuardar,
                         modifier = Modifier
@@ -260,13 +294,13 @@ fun AgregarCatalogItemSheet(
                         ),
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Add,
+                            imageVector = if (esEdicion) Icons.Default.Edit else Icons.Default.Add,
                             contentDescription = null,
                             modifier = Modifier.size(20.dp),
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Guardar",
+                            text = if (esEdicion) "Actualizar" else "Guardar",
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
                         )
@@ -286,9 +320,9 @@ private data class UnidadUi(
 
 private val UNIDADES_PRODUCTO = listOf(
     UnidadUi("NIU", "Unidad"),
-    UnidadUi("MTR", "Metro"),
-    UnidadUi("KGM", "Kilogramo"),
-    UnidadUi("LTR", "Litro"),
+    UnidadUi("MTR", "MTR"),
+    UnidadUi("KGM", "Kg"),
+    UnidadUi("LTR", "LI"),
 )
 
 private val UNIDADES_SERVICIO = listOf(
@@ -399,12 +433,44 @@ private fun TipoItemCard(
     }
 }
 
+private fun String.filterPrecioDecimal(): String {
+    val cleaned = replace(',', '.')
+    val filtered = buildString {
+        var dotUsed = false
+        for (ch in cleaned) {
+            when {
+                ch.isDigit() -> append(ch)
+                ch == '.' && !dotUsed -> {
+                    append(ch)
+                    dotUsed = true
+                }
+            }
+        }
+    }
+    val parts = filtered.split('.')
+    if (parts.size == 2 && parts[1].length > 2) {
+        return "${parts[0]}.${parts[1].take(2)}"
+    }
+    return filtered.take(12)
+}
+
+private fun parsePrecioTexto(texto: String): Double =
+    texto.trim().replace(',', '.').toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
+
+private fun formatPrecioParaCampo(precio: Double): String = when {
+    precio <= 0.0 -> ""
+    precio == precio.toLong().toDouble() -> precio.toLong().toString()
+    else -> "%.2f".format(precio).trimEnd('0').trimEnd('.')
+}
+
 @Composable
 private fun NuevoItemCampo(
     value: String,
     onValueChange: (String) -> Unit,
     label: String,
     placeholder: String,
+    prefix: @Composable (() -> Unit)? = null,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
 ) {
     val bringIntoViewRequester = remember { BringIntoViewRequester() }
     val scope = rememberCoroutineScope()
@@ -421,6 +487,8 @@ private fun NuevoItemCampo(
                 }
             },
         label = { Text(label, color = C.textSecondary) },
+        prefix = prefix,
+        keyboardOptions = keyboardOptions,
         placeholder = {
             Text(
                 text = placeholder,

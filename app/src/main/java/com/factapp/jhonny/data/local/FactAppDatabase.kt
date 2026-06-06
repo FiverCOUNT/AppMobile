@@ -16,7 +16,7 @@ import com.factapp.jhonny.modelos.Usuario
         Company::class,
         Usuario::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(AppRoomConverters::class)
@@ -67,6 +67,16 @@ abstract class FactAppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE usuarios ADD COLUMN rol TEXT NOT NULL DEFAULT 'USUARIO'",
+                )
+                db.execSQL("ALTER TABLE usuarios ADD COLUMN almacen_id TEXT")
+                db.execSQL("ALTER TABLE usuarios ADD COLUMN almacen_nombre TEXT")
+            }
+        }
+
         @Volatile
         private var instancia: FactAppDatabase? = null
 
@@ -77,7 +87,7 @@ abstract class FactAppDatabase : RoomDatabase() {
                     FactAppDatabase::class.java,
                     "fact_app.db",
                 )
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instancia = it }
