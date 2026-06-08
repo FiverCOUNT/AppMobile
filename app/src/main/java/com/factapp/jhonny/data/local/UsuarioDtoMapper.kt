@@ -5,38 +5,49 @@ import com.factapp.jhonny.network.dto.model.BusinessTemplate
 import com.factapp.jhonny.modelos.Usuario as UsuarioEntity
 import com.factapp.jhonny.network.dto.model.Company as CompanyDto
 import com.factapp.jhonny.network.dto.model.UsuarioSesionApi
-import com.factapp.jhonny.network.dto.model.lineaPrincipal
+import com.factapp.jhonny.network.dto.model.direccion
 import com.factapp.jhonny.network.dto.model.Usuario as UsuarioDto
 import java.sql.Timestamp
 
-fun CompanyDto.toEntity(): CompanyEntity = CompanyEntity(
-    ruc = ruc,
-    nombre = nombre,
-    rutaFirma = rutaFirma,
-    rutaLogo = rutaLogo,
-    name_logo = nameLogo,
-    direccion = address.lineaPrincipal,
-    telefono = telefonoPrincipal,
-    plantilla = BusinessTemplate.GENERAL,
-)
+fun CompanyDto.toEntityOrNull(): CompanyEntity? {
+    val rucFinal = ruc.takeIf { it.isNotBlank() }
+        ?: documentoNumero.takeIf { it.isNotBlank() }
+        ?: return null
+    return CompanyEntity(
+        ruc = rucFinal,
+        nombre = nombre.takeIf { it.isNotBlank() } ?: "Empresa",
+        rutaFirma = rutaFirma,
+        rutaLogo = rutaLogo,
+        name_logo = nameLogo,
+        direccion = direccion,
+        telefono = telefonoPrincipal,
+        plantilla = BusinessTemplate.GENERAL,
+    )
+}
 
-fun UsuarioDto.toEntity(): UsuarioEntity = UsuarioEntity(
-    email = email,
-    contrasena = contrasena,
-    token = token,
-    refreshToken = refreshToken,
-    lastUpdated = Timestamp(lastUpdated.takeIf { it > 0 } ?: System.currentTimeMillis()),
-    estado = estado,
-    rol = rol,
-    almacenId = almacenId,
-    almacenNombre = almacenNombre,
-    company = company?.toEntity() ?: companyDesdeCamposPlanos(),
-)
+fun UsuarioDto.toEntity(): UsuarioEntity {
+    require(email.isNotBlank()) { "El servidor no devolvió email de usuario" }
+    return UsuarioEntity(
+        email = email,
+        contrasena = contrasena,
+        token = token,
+        refreshToken = refreshToken,
+        lastUpdated = Timestamp(lastUpdated.takeIf { it > 0 } ?: System.currentTimeMillis()),
+        estado = estado,
+        rol = rol,
+        almacenId = almacenId,
+        almacenNombre = almacenNombre,
+        company = company?.toEntityOrNull() ?: companyDesdeCamposPlanos(),
+    )
+}
 
-/** Login/refresh: fusiona tokens del `data` con el [UsuarioDto] anidado en `user`. */
+/** Login/refresh: fusiona tokens y almacén (raíz o `user`) con el perfil anidado. */
 fun UsuarioSesionApi.toUsuarioEntity(): UsuarioEntity = user.copy(
     token = accessToken,
     refreshToken = refreshToken,
+    almacenId = user.almacenId?.takeIf { it.isNotBlank() } ?: almacenId,
+    almacenNombre = user.almacenNombre?.takeIf { it.isNotBlank() } ?: almacenNombre,
+    almacenCodigo = user.almacenCodigo?.takeIf { it.isNotBlank() } ?: almacenCodigo,
 ).toEntity()
 
 private fun UsuarioDto.companyDesdeCamposPlanos(): CompanyEntity? =

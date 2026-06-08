@@ -102,16 +102,44 @@ object InventarioRepository {
         catalogItemId: String,
         token: String?,
         almacenId: String? = null,
-    ): Result<List<ProductoSerie>> = llamar(
-        companyRuc = companyRuc,
-        token = token,
-        demo = { InventarioDemo.seriesDisponibles(companyRuc, catalogItemId, almacenId) },
-    ) {
-        RetrofitClient.api.listarSeriesDisponibles(
-            ruc = companyRuc,
+        usarRespaldoSiVacio: Boolean = false,
+    ): Result<List<ProductoSerie>> {
+        if (companyRuc.isBlank()) {
+            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
+        }
+        if (token.isNullOrBlank()) {
+            return Result.success(
+                seriesConRespaldo(companyRuc, catalogItemId, almacenId, usarRespaldoSiVacio),
+            )
+        }
+        return try {
+            Result.success(
+                RetrofitClient.api.listarSeriesDisponibles(
+                    ruc = companyRuc,
+                    catalogItemId = catalogItemId,
+                    authorization = bearer(token),
+                    almacenId = almacenId?.takeIf { it.isNotBlank() },
+                ),
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun seriesConRespaldo(
+        companyRuc: String,
+        catalogItemId: String,
+        almacenId: String?,
+        usarRespaldoSiVacio: Boolean,
+    ): List<ProductoSerie> {
+        val demo = InventarioDemo.seriesDisponibles(companyRuc, catalogItemId, almacenId)
+        if (demo.isNotEmpty()) return demo
+        if (!usarRespaldoSiVacio) return emptyList()
+        return InventarioDemo.seriesGeneradas(
+            companyRuc = companyRuc,
             catalogItemId = catalogItemId,
-            authorization = bearer(token),
             almacenId = almacenId,
+            cantidad = 20,
         )
     }
 
@@ -119,12 +147,20 @@ object InventarioRepository {
         companyRuc: String,
         token: String?,
         body: RegistrarEntradaRequest,
-    ): Result<Movimiento> = llamar(
-        companyRuc = companyRuc,
-        token = token,
-        demo = { movimientoDemoEntrada(body) },
-    ) {
-        RetrofitClient.api.registrarEntrada(companyRuc, bearer(token), body)
+    ): Result<Movimiento> {
+        if (companyRuc.isBlank()) {
+            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
+        }
+        if (token.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("Inicia sesión para registrar ingresos"))
+        }
+        return try {
+            Result.success(
+                RetrofitClient.api.registrarEntrada(companyRuc, bearer(token), body),
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun registrarSalida(
@@ -153,16 +189,24 @@ object InventarioRepository {
     suspend fun listarIngresos(
         companyRuc: String,
         token: String?,
-    ): Result<List<Movimiento>> = llamar(
-        companyRuc = companyRuc,
-        token = token,
-        demo = { InventarioDemo.movimientosEntradaDemo(companyRuc) },
-    ) {
-        RetrofitClient.api.listarMovimientos(
-            ruc = companyRuc,
-            authorization = bearer(token),
-            tipo = MovimientoTipo.ENTRADA.name,
-        )
+    ): Result<List<Movimiento>> {
+        if (companyRuc.isBlank()) {
+            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
+        }
+        if (token.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("Inicia sesión para ver ingresos"))
+        }
+        return try {
+            Result.success(
+                RetrofitClient.api.listarMovimientos(
+                    ruc = companyRuc,
+                    authorization = bearer(token),
+                    tipo = MovimientoTipo.ENTRADA.name,
+                ),
+            )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     suspend fun listarHistorial(

@@ -7,6 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import android.graphics.Color
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,6 +84,11 @@ class MainActivity : FragmentActivity() {
           }
 
           Pantalla.Dashboard -> {
+            if (usuarioSesion == null) {
+              LaunchedEffect(Unit) {
+                pantalla = Pantalla.Login
+              }
+            } else {
             DashboardScreen(
               modifier = Modifier.fillMaxSize(),
               usuario = usuarioSesion,
@@ -118,6 +124,7 @@ class MainActivity : FragmentActivity() {
                 pantalla = Pantalla.Configuracion
               },
             )
+            }
           }
 
           Pantalla.ComprobantesEmitidos -> {

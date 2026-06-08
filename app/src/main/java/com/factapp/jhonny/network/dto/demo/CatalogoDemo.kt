@@ -22,7 +22,10 @@ object CatalogoDemo {
         producto(companyRuc, "demo-09", "Agua mineral 625 ml", 1.50, stock = 300.0),
         producto(companyRuc, "demo-10", "Harina de maíz 1 kg", 5.90, stock = 70.0),
         producto(companyRuc, "demo-11", "Pollo entero (kg)", 11.50, stock = 25.0, unidad = "KGM"),
+        productoConSerie(companyRuc, InventarioDemo.ID_PRODUCTO_SERIES, "Producto Series", 199.00, stock = 20.0),
         productoConSerie(companyRuc, "demo-pc", "Laptop Dell 15\"", 2499.00, stock = 2.0),
+        productoConSerie(companyRuc, "demo-monitor", "Monitor LG 27\"", 899.00, stock = 3.0),
+        productoConSerie(companyRuc, "demo-cel", "Celular Samsung A54", 1299.00, stock = 4.0),
         producto(companyRuc, "demo-12", "Cerveza lata 330 ml", 4.00, stock = 144.0),
         producto(companyRuc, "demo-13", "Café molido 250 g", 18.00, stock = 40.0),
         producto(companyRuc, "demo-14", "Azúcar rubia 1 kg", 4.20, stock = 100.0),
@@ -45,6 +48,8 @@ object CatalogoDemo {
                 "demo-05" -> item.copy(stockActual = 15.0)
                 "demo-09" -> item.copy(stockActual = 60.0)
                 "demo-14" -> item.copy(stockActual = 20.0)
+                "demo-pc" -> item.copy(stockActual = 1.0)
+                "demo-monitor" -> item.copy(stockActual = 2.0)
                 else -> null
             }
         }

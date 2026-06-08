@@ -259,16 +259,23 @@ fun LoginScreen(
 
                     Button(
                         onClick = {
+                            if (cargando) return@Button
                             scope.launch {
                                 cargando = true
-                                AuthRepository.login(context, email, pin, recordarSesion)
-                                    .onSuccess { usuario ->
-                                        onLoginBackendExitoso(usuario)
-                                    }
-                                    .onFailure { error ->
-                                        onLoginBackendFallo(error.mensajeAuth())
-                                    }
-                                cargando = false
+                                val result = AuthRepository.login(
+                                    context,
+                                    email,
+                                    pin,
+                                    recordarSesion,
+                                )
+                                result.onSuccess { usuario ->
+                                    cargando = false
+                                    onLoginBackendExitoso(usuario)
+                                }
+                                result.onFailure { error ->
+                                    cargando = false
+                                    onLoginBackendFallo(error.mensajeAuth())
+                                }
                             }
                         },
                         enabled = emailValido && pinValido && !cargando,
@@ -339,19 +346,17 @@ fun LoginScreen(
                                             cargando = true
                                             val renovado = AuthRepository.refreshSesion(context)
                                             if (renovado.isSuccess) {
+                                                cargando = false
                                                 renovado.getOrNull()?.let { onBiometricSuccess(it) }
                                             } else {
-                                                val local = AuthRepository.restaurarSesionLocal(context)
-                                                if (local?.token != null) {
-                                                    onBiometricSuccess(local)
-                                                } else {
-                                                    onLoginBackendFallo(
-                                                        renovado.exceptionOrNull()?.mensajeAuth()
-                                                            ?: "Inicia sesión con email y PIN.",
-                                                    )
-                                                }
+                                                AuthRepository.limpiarSesionLocal(context)
+                                                sesionPersistida = false
+                                                cargando = false
+                                                onLoginBackendFallo(
+                                                    renovado.exceptionOrNull()?.mensajeAuth()
+                                                        ?: "Sesión expirada. Inicia sesión con email y PIN.",
+                                                )
                                             }
-                                            cargando = false
                                         }
                                     }
 

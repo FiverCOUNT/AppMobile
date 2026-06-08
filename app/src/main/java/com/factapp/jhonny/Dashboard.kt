@@ -34,18 +34,19 @@ import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.ReceiptLong
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Receipt
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -53,11 +54,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +77,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.modelos.Usuario
+import com.factapp.jhonny.network.ComprobanteRepository
+import com.factapp.jhonny.network.dto.companyRucParaCatalogo
+import com.factapp.jhonny.network.dto.etiquetaTipo
+import com.factapp.jhonny.network.dto.fechaEmisionLocal
+import com.factapp.jhonny.network.dto.formatearSoles
+import com.factapp.jhonny.network.dto.model.ComprobanteEstado
+import com.factapp.jhonny.network.dto.model.Invoice
+import com.factapp.jhonny.network.dto.model.InvoiceTipoDoc
 import com.factapp.jhonny.ui.components.ApplySystemBarsColor
 import com.factapp.jhonny.ui.components.PartialOptionCard
 import com.factapp.jhonny.ui.components.PartialOptionsBottomSheet
@@ -78,6 +92,96 @@ import com.factapp.jhonny.ui.components.PartialSheetTheme
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 import com.factapp.jhonny.ui.theme.EasyTheme
 import androidx.compose.foundation.BorderStroke
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
+private data class DashboardComprobanteResumen(
+    val titulo: String,
+    val detalle: String,
+    val monto: String,
+    val etiquetaMonto: String,
+)
+
+private data class DashboardResumenCalculado(
+    val ventasMes: Double,
+    val porCobrar: Double,
+    val progresoCobrado: Float,
+    val comprobantes: List<DashboardComprobanteResumen>,
+)
+
+private fun Invoice.esVentaDashboard(): Boolean = when (tipo) {
+    InvoiceTipoDoc.FACTURA, InvoiceTipoDoc.BOLETA -> true
+    InvoiceTipoDoc.COD_FACTURA, InvoiceTipoDoc.COD_BOLETA -> true
+    else -> false
+}
+
+private fun Invoice.esFacturaDashboard(): Boolean =
+    tipo == InvoiceTipoDoc.FACTURA || tipoDoc == InvoiceTipoDoc.COD_FACTURA
+
+private fun Invoice.esBoletaDashboard(): Boolean =
+    tipo == InvoiceTipoDoc.BOLETA || tipoDoc == InvoiceTipoDoc.COD_BOLETA
+
+private fun Invoice.detalleDashboard(): String {
+    val fecha = fechaEmisionLocal()
+    val etiquetaFecha = when (fecha) {
+        null -> "Sin fecha"
+        LocalDate.now() -> "Hoy"
+        LocalDate.now().minusDays(1) -> "Ayer"
+        else -> DateTimeFormatter.ofPattern("d MMM", Locale("es", "PE")).format(fecha)
+    }
+    return "Serie $serie • $etiquetaFecha"
+}
+
+private fun Invoice.etiquetaEstadoDashboard(): String = when (estado) {
+    ComprobanteEstado.ENVIADO -> "Enviada a SUNAT"
+    ComprobanteEstado.ACEPTADO -> "Aceptada por SUNAT"
+    ComprobanteEstado.BORRADOR -> "Pendiente de cobro"
+    ComprobanteEstado.RECHAZADO -> "Rechazada"
+    ComprobanteEstado.ANULADO -> "Anulada"
+}
+
+private fun Invoice.aDashboardResumen(): DashboardComprobanteResumen =
+    DashboardComprobanteResumen(
+        titulo = "${etiquetaTipo()} electrónica",
+        detalle = detalleDashboard(),
+        monto = formatearSoles(totales.total),
+        etiquetaMonto = etiquetaEstadoDashboard(),
+    )
+
+private fun calcularDashboardResumen(comprobantes: List<Invoice>): DashboardResumenCalculado {
+    val hoy = LocalDate.now()
+    val inicioMes = hoy.withDayOfMonth(1)
+    val delMes = comprobantes.filter { doc ->
+        val fecha = doc.fechaEmisionLocal() ?: return@filter false
+        !fecha.isBefore(inicioMes) && !fecha.isAfter(hoy) && doc.esVentaDashboard()
+    }
+    val ventasMes = delMes.sumOf { it.totales.total }
+    val porCobrar = delMes
+        .filter { it.estado == ComprobanteEstado.BORRADOR || it.estado == ComprobanteEstado.ENVIADO }
+        .sumOf { it.totales.total }
+    val progreso = if (ventasMes > 0) {
+        ((ventasMes - porCobrar) / ventasMes).toFloat().coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val ultimaFactura = comprobantes
+        .filter { it.esFacturaDashboard() }
+        .maxByOrNull { it.fechaEmisionLocal() ?: LocalDate.MIN }
+    val ultimaBoleta = comprobantes
+        .filter { it.esBoletaDashboard() }
+        .maxByOrNull { it.fechaEmisionLocal() ?: LocalDate.MIN }
+    val destacados = listOfNotNull(ultimaFactura, ultimaBoleta).map { it.aDashboardResumen() }
+    return DashboardResumenCalculado(
+        ventasMes = ventasMes,
+        porCobrar = porCobrar,
+        progresoCobrado = progreso,
+        comprobantes = destacados,
+    )
+}
 
 // Paleta alineada a la captura (fondo gris claro, azul institucional, acento celeste en barra)
 private val DashboardBg = Color(0xFFEBEBEB)
@@ -110,10 +214,78 @@ fun DashboardScreen(
     var tabSeleccionado by remember { mutableIntStateOf(0) }
     var mostrarMenuEmitir by remember { mutableStateOf(false) }
     var mostrarMenuMas by remember { mutableStateOf(false) }
+    var refrescando by remember { mutableStateOf(false) }
+    var cargandoInicial by remember { mutableStateOf(true) }
+    var ventasMes by remember { mutableDoubleStateOf(0.0) }
+    var porCobrar by remember { mutableDoubleStateOf(0.0) }
+    var progresoCobrado by remember { mutableStateOf(0f) }
+    var comprobantesResumen by remember { mutableStateOf<List<DashboardComprobanteResumen>>(emptyList()) }
+    var refreshKey by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+
+    val companyRuc = usuario?.companyRucParaCatalogo().orEmpty()
+    val token = usuario?.token
     val nombreSaludo = usuario?.company?.nombre
         ?: usuario?.email?.substringBefore("@")
         ?: "Usuario"
     val ruc = usuario?.company?.ruc ?: "—"
+
+    suspend fun cargarDashboard() {
+        if (companyRuc.isBlank()) {
+            comprobantesResumen = emptyList()
+            ventasMes = 0.0
+            porCobrar = 0.0
+            progresoCobrado = 0f
+            return
+        }
+        val hoy = LocalDate.now()
+        val inicioMes = hoy.withDayOfMonth(1)
+        withContext(Dispatchers.IO) {
+            ComprobanteRepository.listarEmitidos(
+                companyRuc = companyRuc,
+                token = token,
+                desde = inicioMes,
+                hasta = hoy,
+            )
+        }.onSuccess { lista ->
+            val resumen = calcularDashboardResumen(lista)
+            ventasMes = resumen.ventasMes
+            porCobrar = resumen.porCobrar
+            progresoCobrado = resumen.progresoCobrado
+            comprobantesResumen = resumen.comprobantes
+            refreshKey++
+        }
+    }
+
+    LaunchedEffect(companyRuc, token) {
+        cargandoInicial = true
+        try {
+            cargarDashboard()
+        } catch (_: Exception) {
+            comprobantesResumen = emptyList()
+            ventasMes = 0.0
+            porCobrar = 0.0
+            progresoCobrado = 0f
+        } finally {
+            cargandoInicial = false
+        }
+    }
+
+    fun refrescarDashboard() {
+        scope.launch {
+            refrescando = true
+            try {
+                cargarDashboard()
+            } catch (_: Exception) {
+                comprobantesResumen = emptyList()
+                ventasMes = 0.0
+                porCobrar = 0.0
+                progresoCobrado = 0f
+            } finally {
+                refrescando = false
+            }
+        }
+    }
 
     ApplySystemBarsColor(
         statusBarColor = DashboardBg,
@@ -138,74 +310,102 @@ fun DashboardScreen(
             )
         },
     ) { innerPadding ->
-        Column(
+        PullToRefreshBox(
+            isRefreshing = refrescando,
+            onRefresh = { refrescarDashboard() },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .statusBarsPadding()
-                .verticalScroll(rememberScrollState()),
+                .padding(innerPadding),
         ) {
-            DashboardHeader(nombreSaludo = nombreSaludo)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                DashboardHeader(
+                    nombreSaludo = nombreSaludo,
+                    onRefresh = { refrescarDashboard() },
+                    refrescando = refrescando || cargandoInicial,
+                )
 
-            Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-            ResumenFacturacionCard(
-                ventasMes = "S/ 12,450.00",
-                pendientes = "S/ 3,280.00",
-                progresoCobrado = 0.79f,
-                onVerMas = onVerMasResumen,
-            )
+                ResumenFacturacionCard(
+                    ventasMes = if (cargandoInicial && !refrescando) "—" else formatearSoles(ventasMes),
+                    pendientes = if (cargandoInicial && !refrescando) "—" else formatearSoles(porCobrar),
+                    progresoCobrado = progresoCobrado,
+                    cargando = cargandoInicial && !refrescando,
+                    onVerMas = onVerMasResumen,
+                )
 
-            Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-            AccionesRapidasRow(
-                onNuevaFactura = onNuevaFactura,
-                onClientes = onClientes,
-                onCatalogo = onCatalogo,
-                onMas = { mostrarMenuMas = true },
-            )
+                AccionesRapidasRow(
+                    onNuevaFactura = onNuevaFactura,
+                    onClientes = onClientes,
+                    onCatalogo = onCatalogo,
+                    onMas = { mostrarMenuMas = true },
+                )
 
-            Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-            BannerFacturacionElectronica()
+                BannerFacturacionElectronica()
 
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
-            Text(
-                text = "Comprobantes",
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = DashboardNavy,
-                ),
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
+                Text(
+                    text = "Comprobantes",
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = DashboardNavy,
+                    ),
+                    modifier = Modifier.padding(horizontal = 20.dp),
+                )
 
-            Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-            ComprobanteCard(
-                titulo = "Factura electrónica",
-                detalle = "Serie F001 • Última emitida",
-                monto = "S/ 850.00",
-                etiquetaMonto = "Pendiente de cobro",
-            )
+                if (cargandoInicial && !refrescando) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(32.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = DashboardNavy)
+                    }
+                } else if (comprobantesResumen.isEmpty()) {
+                    Text(
+                        text = "No hay comprobantes recientes",
+                        color = DashboardTextMuted,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                    )
+                } else {
+                    comprobantesResumen.forEachIndexed { index, item ->
+                        if (index > 0) Spacer(modifier = Modifier.height(10.dp))
+                        key(refreshKey, item.titulo, item.detalle) {
+                            ComprobanteCard(
+                                titulo = item.titulo,
+                                detalle = item.detalle,
+                                monto = item.monto,
+                                etiquetaMonto = item.etiquetaMonto,
+                            )
+                        }
+                    }
+                }
 
-            Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-            ComprobanteCard(
-                titulo = "Boleta electrónica",
-                detalle = "Serie B001 • Hoy",
-                monto = "S/ 120.50",
-                etiquetaMonto = "Enviada a SUNAT",
-            )
+                key(refreshKey, nombreSaludo, ruc) {
+                    EmpresaResumenCard(
+                        nombreEmpresa = usuario?.company?.nombre ?: "Sin empresa vinculada",
+                        ruc = ruc,
+                    )
+                }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            EmpresaResumenCard(
-                nombreEmpresa = usuario?.company?.nombre ?: "Sin empresa vinculada",
-                ruc = ruc,
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 
@@ -401,7 +601,11 @@ private fun TipoComprobante.emitirMenuColors(): EmitirMenuColors = when (this) {
 }
 
 @Composable
-private fun DashboardHeader(nombreSaludo: String) {
+private fun DashboardHeader(
+    nombreSaludo: String,
+    onRefresh: () -> Unit,
+    refrescando: Boolean,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -424,8 +628,10 @@ private fun DashboardHeader(nombreSaludo: String) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             HeaderIconAction(
-                icon = Icons.Outlined.HelpOutline,
-                label = "Ayuda",
+                icon = Icons.Default.Refresh,
+                label = "Actualizar",
+                onClick = onRefresh,
+                enabled = !refrescando,
             )
             HeaderIconAction(
                 icon = Icons.Default.Menu,
@@ -436,24 +642,33 @@ private fun DashboardHeader(nombreSaludo: String) {
 }
 
 @Composable
-private fun HeaderIconAction(icon: ImageVector, label: String) {
+private fun HeaderIconAction(
+    icon: ImageVector,
+    label: String,
+    onClick: (() -> Unit)? = null,
+    enabled: Boolean = true,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .widthIn(min = 48.dp, max = 56.dp)
-            .padding(horizontal = 2.dp),
+            .padding(horizontal = 2.dp)
+            .then(
+                if (onClick != null && enabled) Modifier.clickable(onClick = onClick)
+                else Modifier,
+            ),
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = DashboardNavy,
+            tint = if (enabled) DashboardNavy else DashboardTextMuted,
             modifier = Modifier.size(24.dp),
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = label,
             fontSize = 10.sp,
-            color = DashboardNavy,
+            color = if (enabled) DashboardNavy else DashboardTextMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -465,6 +680,7 @@ private fun ResumenFacturacionCard(
     ventasMes: String,
     pendientes: String,
     progresoCobrado: Float,
+    cargando: Boolean,
     onVerMas: () -> Unit,
 ) {
     Card(
@@ -480,15 +696,26 @@ private fun ResumenFacturacionCard(
             Spacer(modifier = Modifier.height(12.dp))
             ResumenFila(label = "Por cobrar", valor = pendientes)
             Spacer(modifier = Modifier.height(16.dp))
-            LinearProgressIndicator(
-                progress = { progresoCobrado },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
-                color = DashboardSky,
-                trackColor = DashboardProgressTrack,
-            )
+            if (cargando) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = DashboardSky,
+                    trackColor = DashboardProgressTrack,
+                )
+            } else {
+                LinearProgressIndicator(
+                    progress = { progresoCobrado },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(8.dp)
+                        .clip(RoundedCornerShape(4.dp)),
+                    color = DashboardSky,
+                    trackColor = DashboardProgressTrack,
+                )
+            }
             Spacer(modifier = Modifier.height(12.dp))
             Text(
                 text = "Ver más",

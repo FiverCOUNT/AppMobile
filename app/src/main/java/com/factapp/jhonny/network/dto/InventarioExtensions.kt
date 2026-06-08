@@ -30,6 +30,10 @@ fun CatalogItem.hayStockPara(cantidad: Double): Boolean {
     return stockDisponible >= cantidad
 }
 
+/** Catálogo: ítem serializable (flag API o nombre tipo "Producto Series"). */
+fun CatalogItem.requiereSeriesEnCatalogo(): Boolean =
+    manejaSerie || nombre.contains("serie", ignoreCase = true)
+
 fun formatCantidadInventario(cantidad: Double): String =
     if (cantidad == cantidad.roundToInt().toDouble()) {
         cantidad.roundToInt().toString()

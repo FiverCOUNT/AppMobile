@@ -85,6 +85,7 @@ fun AgregarCatalogItemSheet(
     var nombre by remember { mutableStateOf("") }
     var precioTexto by remember { mutableStateOf("") }
     var esProducto by remember { mutableStateOf(true) }
+    var manejaSerie by remember { mutableStateOf(false) }
     var unidadSeleccionada by remember { mutableStateOf(CatalogItemKind.PRODUCT.unidadPorDefecto()) }
 
     val precioUnitario = parsePrecioTexto(precioTexto)
@@ -96,15 +97,18 @@ fun AgregarCatalogItemSheet(
             nombre = itemExistente.nombre
             precioTexto = formatPrecioParaCampo(itemExistente.precioUnitario)
             esProducto = itemExistente.esProducto
+            manejaSerie = itemExistente.esProducto && itemExistente.manejaSerie
             unidadSeleccionada = itemExistente.unidad
         } else {
             nombre = ""
             precioTexto = ""
             esProducto = true
+            manejaSerie = false
             unidadSeleccionada = CatalogItemKind.PRODUCT.unidadPorDefecto()
         }
     }
     LaunchedEffect(esProducto) {
+        if (!esProducto) manejaSerie = false
         val opciones = if (esProducto) UNIDADES_PRODUCTO else UNIDADES_SERVICIO
         if (unidadSeleccionada !in opciones.map { it.codigo }) {
             unidadSeleccionada = opciones.first().codigo
@@ -207,16 +211,25 @@ fun AgregarCatalogItemSheet(
                             seleccionada = unidadSeleccionada,
                             onSeleccionar = { unidadSeleccionada = it },
                         )
+                        if (esProducto) {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            NuevoItemSeccionTitulo("Número de serie")
+                            Spacer(modifier = Modifier.height(8.dp))
+                            ManejaSerieSelector(
+                                conSerie = manejaSerie,
+                                onSeleccionar = { manejaSerie = it },
+                            )
+                        }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
                 NuevoItemNotaInformativa(
-                    texto = if (esProducto) {
-                        "El stock se actualizará al registrar salidas de mercadería."
-                    } else {
-                        "Los servicios no requieren inventario ni salidas de stock."
+                    texto = when {
+                        !esProducto -> "Los servicios no requieren inventario ni salidas de stock."
+                        manejaSerie -> "Cada unidad tendrá un número de serie. El stock será la cantidad de series disponibles."
+                        else -> "El stock se actualizará al registrar salidas de mercadería."
                     },
                 )
 
@@ -252,8 +265,8 @@ fun AgregarCatalogItemSheet(
                                     nombre = nombre.trim(),
                                     precioUnitario = precio,
                                     unidad = unidadSeleccionada,
-                                    manejaStock = if (esProducto) itemExistente.manejaStock else false,
-                                    manejaSerie = if (esProducto) itemExistente.manejaSerie else false,
+                                    manejaStock = esProducto,
+                                    manejaSerie = esProducto && manejaSerie,
                                     stockActual = if (esProducto) itemExistente.stockActual else null,
                                     duracionMinutos = if (!esProducto) {
                                         itemExistente.duracionMinutos ?: 60
@@ -271,6 +284,7 @@ fun AgregarCatalogItemSheet(
                                     precioUnitario = precio,
                                     activo = true,
                                     manejaStock = esProducto,
+                                    manejaSerie = esProducto && manejaSerie,
                                     stockActual = null,
                                     duracionMinutos = if (!esProducto) 60 else null,
                                 )
@@ -328,6 +342,62 @@ private val UNIDADES_PRODUCTO = listOf(
 private val UNIDADES_SERVICIO = listOf(
     UnidadUi("ZZ", "Servicio"),
 )
+
+@Composable
+private fun ManejaSerieSelector(
+    conSerie: Boolean,
+    onSeleccionar: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = !conSerie,
+            onClick = { onSeleccionar(false) },
+            label = {
+                Text(
+                    text = "Sin serie",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            },
+            modifier = Modifier.weight(1f),
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = C.accentSoft,
+                selectedLabelColor = C.accent,
+            ),
+            border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
+                selected = !conSerie,
+                borderColor = C.border,
+                selectedBorderColor = C.accent.copy(alpha = 0.35f),
+            ),
+        )
+        FilterChip(
+            selected = conSerie,
+            onClick = { onSeleccionar(true) },
+            label = {
+                Text(
+                    text = "Con serie",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            },
+            modifier = Modifier.weight(1f),
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = C.accentSoft,
+                selectedLabelColor = C.accent,
+            ),
+            border = FilterChipDefaults.filterChipBorder(
+                enabled = true,
+                selected = conSerie,
+                borderColor = C.border,
+                selectedBorderColor = C.accent.copy(alpha = 0.35f),
+            ),
+        )
+    }
+}
 
 @Composable
 private fun UnidadItemSelector(

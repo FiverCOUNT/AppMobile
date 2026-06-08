@@ -1,6 +1,10 @@
 package com.factapp.jhonny
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,15 +18,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -41,7 +50,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import com.factapp.jhonny.network.dto.model.ProductoSerie
+import com.factapp.jhonny.network.dto.model.ProductoSerieEstado
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +70,7 @@ import com.factapp.jhonny.network.dto.companyRucParaCatalogo
 import com.factapp.jhonny.network.mensajeAuth
 import com.factapp.jhonny.network.dto.etiquetaStock
 import com.factapp.jhonny.network.dto.formatearSoles
+import com.factapp.jhonny.network.dto.requiereSeriesEnCatalogo
 import com.factapp.jhonny.ui.catalogo.AgregarCatalogItemSheet
 import com.factapp.jhonny.ui.catalogo.CatalogItemActionSheet
 import com.factapp.jhonny.ui.catalogo.CatalogoAlmacenBar
@@ -97,6 +110,7 @@ fun CatalogoScreen(
     var itemAEditar by remember { mutableStateOf<CatalogItem?>(null) }
     var busqueda by remember { mutableStateOf("") }
     var guardando by remember { mutableStateOf(false) }
+    var itemExpandidoId by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     val almacenFiltroId = if (puedeGestionar) almacenSeleccionadoId else usuario?.almacenId
@@ -330,12 +344,23 @@ fun CatalogoScreen(
                                 }
                             }
                         } else {
-                            items(itemsFiltrados, key = { it.id }) { item ->
+                            items(
+                                items = itemsFiltrados,
+                                key = { "${it.id}_${almacenFiltroId.orEmpty()}" },
+                            ) { item ->
                                 CatalogoItemCard(
                                     item = item,
                                     modifier = Modifier.padding(horizontal = 16.dp),
                                     mostrarOpciones = puedeGestionar,
                                     onOpciones = { itemOpciones = item },
+                                    expandido = itemExpandidoId == item.id,
+                                    onToggleExpand = {
+                                        itemExpandidoId = if (itemExpandidoId == item.id) null else item.id
+                                    },
+                                    companyRuc = companyRuc,
+                                    token = token,
+                                    almacenId = almacenFiltroId,
+                                    almacenNombre = almacenEtiquetaNombre,
                                 )
                             }
                         }
@@ -443,9 +468,64 @@ private fun CatalogoItemCard(
     item: CatalogItem,
     mostrarOpciones: Boolean,
     onOpciones: () -> Unit,
+    expandido: Boolean,
+    onToggleExpand: () -> Unit,
+    companyRuc: String,
+    token: String?,
+    almacenId: String?,
+    almacenNombre: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val alpha = if (item.activo) 1f else 0.55f
+    val esConSerie = item.requiereSeriesEnCatalogo()
+    var cargandoSeries by remember(item.id, almacenId) { mutableStateOf(false) }
+    var series by remember(item.id, almacenId) { mutableStateOf<List<ProductoSerie>>(emptyList()) }
+    var errorSeries by remember(item.id, almacenId) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(expandido, item.id, companyRuc, token, almacenId, esConSerie) {
+        if (!expandido || !esConSerie) {
+            if (!expandido) {
+                series = emptyList()
+                errorSeries = null
+                cargandoSeries = false
+            }
+            return@LaunchedEffect
+        }
+        val almacenConsulta = almacenId?.takeIf { it.isNotBlank() }
+        if (almacenConsulta == null) {
+            errorSeries = "Selecciona un almacén para ver las series"
+            series = emptyList()
+            cargandoSeries = false
+            return@LaunchedEffect
+        }
+        cargandoSeries = true
+        errorSeries = null
+        series = emptyList()
+        val resultado = withContext(Dispatchers.IO) {
+            InventarioRepository.listarSeriesDisponibles(
+                companyRuc = companyRuc,
+                catalogItemId = item.id,
+                token = token,
+                almacenId = almacenConsulta,
+            ).fold(
+                onSuccess = { it },
+                onFailure = {
+                    errorSeries = it.mensajeAuth()
+                    emptyList()
+                },
+            )
+        }
+        if (almacenConsulta == almacenId) {
+            series = resultado
+            cargandoSeries = false
+        }
+    }
+
+    val onClickFila = when {
+        esConSerie -> onToggleExpand
+        mostrarOpciones -> onOpciones
+        else -> null
+    }
 
     Card(
         modifier = modifier
@@ -455,76 +535,196 @@ private fun CatalogoItemCard(
         colors = CardDefaults.cardColors(containerColor = C.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (mostrarOpciones) Modifier.clickable(onClick = onOpciones)
-                    else Modifier
-                )
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = item.nombre,
-                        fontWeight = FontWeight.SemiBold,
-                        color = C.textPrimary,
-                        fontSize = 16.sp,
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (onClickFila != null) Modifier.clickable(onClick = onClickFila)
+                        else Modifier
                     )
-                    if (!item.activo) {
-                        Spacer(modifier = Modifier.size(8.dp))
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (esConSerie) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = if (expandido) "Ocultar series" else "Ver series",
+                        tint = C.textSecondary,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .rotate(if (expandido) 90f else 0f),
+                    )
+                    Spacer(modifier = Modifier.size(8.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = item.nombre,
+                            fontWeight = FontWeight.SemiBold,
+                            color = C.textPrimary,
+                            fontSize = 16.sp,
+                        )
+                        if (!item.activo) {
+                            Spacer(modifier = Modifier.size(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFFFFE5E5),
+                            ) {
+                                Text(
+                                    text = "Inactivo",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    fontSize = 11.sp,
+                                    color = Color(0xFFC62828),
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = buildString {
+                            append(item.tipo.etiqueta)
+                            item.etiquetaStock()?.let { append(" · $it") }
+                            if (esConSerie) append(" · Toca para ver series")
+                        },
+                        fontSize = 13.sp,
+                        color = C.textSecondary,
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = formatearSoles(item.precioUnitario),
+                        fontWeight = FontWeight.Bold,
+                        color = C.accent,
+                        fontSize = 15.sp,
+                    )
+                    if (mostrarOpciones) {
+                        Spacer(modifier = Modifier.height(6.dp))
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFFFFE5E5),
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clickable(onClick = onOpciones),
+                            shape = CircleShape,
+                            color = C.surfaceSoft,
                         ) {
-                            Text(
-                                text = "Inactivo",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontSize = 11.sp,
-                                color = Color(0xFFC62828),
-                                fontWeight = FontWeight.Medium,
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreHoriz,
+                                    contentDescription = "Opciones",
+                                    tint = C.textSecondary,
+                                )
+                            }
                         }
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = buildString {
-                        append(item.tipo.etiqueta)
-                        item.etiquetaStock()?.let { append(" · $it") }
-                    },
-                    fontSize = 13.sp,
-                    color = C.textSecondary,
-                )
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    text = formatearSoles(item.precioUnitario),
-                    fontWeight = FontWeight.Bold,
-                    color = C.accent,
-                    fontSize = 15.sp,
-                )
-                if (mostrarOpciones) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Surface(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clickable(onClick = onOpciones),
-                        shape = CircleShape,
-                        color = C.surfaceSoft,
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.MoreHoriz,
-                                contentDescription = "Opciones",
-                                tint = C.textSecondary,
+            AnimatedVisibility(
+                visible = esConSerie && expandido,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                ) {
+                    HorizontalDivider(color = C.border.copy(alpha = 0.4f))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = buildString {
+                            append("Series disponibles (${series.size})")
+                            almacenNombre?.takeIf { it.isNotBlank() }?.let { append(" · $it") }
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = C.textSecondary,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    when {
+                        cargandoSeries -> Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                color = C.accent,
+                                strokeWidth = 2.dp,
                             )
+                        }
+                        errorSeries != null -> Text(
+                            text = errorSeries!!,
+                            fontSize = 13.sp,
+                            color = Color(0xFFC62828),
+                        )
+                        series.isEmpty() -> Text(
+                            text = "No hay series en este almacén.",
+                            fontSize = 13.sp,
+                            color = C.textSecondary,
+                        )
+                        else -> Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 320.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            series.forEach { serie ->
+                                CatalogoSerieFila(serie = serie)
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun CatalogoSerieFila(serie: ProductoSerie) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = C.surfaceSoft,
+        border = BorderStroke(1.dp, C.border.copy(alpha = 0.35f)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = serie.numeroSerie,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                color = C.textPrimary,
+            )
+            Text(
+                text = serie.estado.etiquetaCatalogo(),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = serie.estado.colorCatalogo(),
+            )
+        }
+    }
+}
+
+private fun ProductoSerieEstado.etiquetaCatalogo(): String = when (this) {
+    ProductoSerieEstado.DISPONIBLE -> "Disponible"
+    ProductoSerieEstado.RESERVADO -> "Reservado"
+    ProductoSerieEstado.VENDIDO -> "Vendido"
+    ProductoSerieEstado.ENTREGADO -> "Entregado"
+    ProductoSerieEstado.BAJA -> "Baja"
+}
+
+private fun ProductoSerieEstado.colorCatalogo(): Color = when (this) {
+    ProductoSerieEstado.DISPONIBLE -> Color(0xFF2E7D32)
+    ProductoSerieEstado.RESERVADO -> Color(0xFFE65100)
+    ProductoSerieEstado.VENDIDO -> C.textSecondary
+    ProductoSerieEstado.ENTREGADO -> C.textSecondary
+    ProductoSerieEstado.BAJA -> Color(0xFFC62828)
 }

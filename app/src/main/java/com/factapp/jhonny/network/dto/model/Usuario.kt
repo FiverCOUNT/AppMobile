@@ -5,6 +5,7 @@ import com.factapp.jhonny.modelos.RolUsuario
 import com.factapp.jhonny.network.gson.EstadoUsuarioTypeAdapter
 import com.factapp.jhonny.network.gson.LongFromJsonAdapter
 import com.factapp.jhonny.network.gson.RolUsuarioTypeAdapter
+import com.factapp.jhonny.network.gson.StringFromJsonAdapter
 import com.google.gson.annotations.JsonAdapter
 import com.google.gson.annotations.SerializedName
 
@@ -32,12 +33,16 @@ data class Usuario(
     @JsonAdapter(RolUsuarioTypeAdapter::class)
     val rol: RolUsuario = RolUsuario.USUARIO,
     @SerializedName("almacenId", alternate = ["almacen_id"])
+    @JsonAdapter(StringFromJsonAdapter::class)
     val almacenId: String? = null,
     @SerializedName("almacenNombre", alternate = ["almacen_nombre"])
     val almacenNombre: String? = null,
+    @SerializedName("almacenCodigo", alternate = ["almacen_codigo"])
+    val almacenCodigo: String? = null,
     @SerializedName("company")
     val company: Company? = null,
     @SerializedName("companyId")
+    @JsonAdapter(StringFromJsonAdapter::class)
     val companyId: String? = null,
     @SerializedName("companyRuc")
     val companyRuc: String? = null,
@@ -45,7 +50,13 @@ data class Usuario(
     val companyNombre: String? = null,
 )
 
-/** Bloque `data` devuelto por `POST /api/auth/login` y `POST /api/auth/refresh`. */
+/**
+ * Bloque `data` devuelto por `POST /api/auth/login` y `POST /api/auth/refresh`.
+ *
+ * Los tokens van en la raíz; el perfil en [user]. [almacenId] puede venir en la raíz
+ * (acceso rápido) o dentro de [user] — [com.factapp.jhonny.data.local.toUsuarioEntity]
+ * fusiona ambos al persistir en Room.
+ */
 data class UsuarioSesionApi(
     @SerializedName("accessToken")
     val accessToken: String,
@@ -53,5 +64,13 @@ data class UsuarioSesionApi(
     val refreshToken: String,
     @SerializedName("tokenType")
     val tokenType: String = "Bearer",
+    /** Almacén asignado al usuario (UUID). Identifica bodega por defecto en catálogo/inventario. */
+    @SerializedName("almacenId", alternate = ["almacen_id"])
+    @JsonAdapter(StringFromJsonAdapter::class)
+    val almacenId: String? = null,
+    @SerializedName("almacenNombre", alternate = ["almacen_nombre"])
+    val almacenNombre: String? = null,
+    @SerializedName("almacenCodigo", alternate = ["almacen_codigo"])
+    val almacenCodigo: String? = null,
     val user: Usuario,
 )

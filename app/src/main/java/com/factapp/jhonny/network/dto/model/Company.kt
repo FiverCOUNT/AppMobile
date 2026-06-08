@@ -10,7 +10,7 @@ data class Company(
     val id: Long? = null,
     val ruc: String = "",
     @SerializedName(value = "nombre", alternate = ["razon_social"])
-    val nombre: String,
+    val nombre: String = "",
     @SerializedName("nombre_comercial")
     val nombreComercial: String? = null,
     /** Cat. 06 — útil cuando [Company] es receptor (DNI, RUC, etc.). */
@@ -119,7 +119,7 @@ data class Company(
 }
 
 val Company.direccion: String?
-    get() = address.lineaPrincipal
+    get() = address?.lineaPrincipal
 
 /** Alias de [nombre] (JSON `razon_social` en receptor/cliente). */
 val Company.razonSocial: String

@@ -4,6 +4,8 @@ import com.factapp.jhonny.network.dto.model.ADDRESS_JSON_KEYS
 import com.factapp.jhonny.network.dto.model.Address
 import com.factapp.jhonny.network.dto.model.Company
 import com.factapp.jhonny.network.dto.model.esSoloLinea
+import com.google.gson.Gson
+import com.google.gson.GsonBuilder
 import com.google.gson.JsonDeserializationContext
 import com.google.gson.JsonDeserializer
 import com.google.gson.JsonElement
@@ -55,16 +57,23 @@ class AddressTypeAdapter : JsonDeserializer<Address>, JsonSerializer<Address> {
 
 /** Campos de domicilio planos en la raíz del JSON de empresa o anidados en `address`. */
 class CompanyTypeAdapter : JsonDeserializer<Company> {
+
+    /** Gson sin este adaptador: evita recursión infinita al parsear `company` en login. */
+    private val delegate: Gson = GsonBuilder()
+        .registerTypeAdapter(Address::class.java, AddressTypeAdapter())
+        .create()
+
     override fun deserialize(
         json: JsonElement,
         typeOfT: Type,
         context: JsonDeserializationContext,
     ): Company {
         val obj = json.asJsonObject
-        val address = parseAddressFromCompanyJson(obj, context)
+        val address = parseAddressFromCompanyJson(obj)
         val stripped = obj.deepCopy()
+        listOf("address", "domicilio_fiscal").forEach { stripped.remove(it) }
         ADDRESS_JSON_KEYS.forEach { stripped.remove(it) }
-        val company = context.deserialize<Company>(stripped, Company::class.java)
+        val company = delegate.fromJson(stripped, Company::class.java)
         return when {
             address == null -> company
             company.address == null -> company.copy(address = address)
@@ -72,19 +81,33 @@ class CompanyTypeAdapter : JsonDeserializer<Company> {
         }
     }
 
-    private fun parseAddressFromCompanyJson(
-        obj: JsonObject,
-        context: JsonDeserializationContext,
-    ): Address? {
+    private fun parseAddressFromCompanyJson(obj: JsonObject): Address? {
         val nested = when {
-            obj.has("address") && obj.get("address").isJsonObject -> obj.get("address")
-            obj.has("domicilio_fiscal") && obj.get("domicilio_fiscal").isJsonObject ->
+            obj.has("address") && !obj.get("address").isJsonNull -> obj.get("address")
+            obj.has("domicilio_fiscal") && !obj.get("domicilio_fiscal").isJsonNull ->
                 obj.get("domicilio_fiscal")
             obj.has("direccion") && obj.get("direccion").isJsonObject -> obj.get("direccion")
-            else -> obj
+            else -> return null
         }
-        return context.deserialize(nested, Address::class.java)
+        if (nested.isJsonPrimitive) {
+            val texto = nested.asString.trim()
+            return texto.takeIf { it.isNotEmpty() }?.let { Address.linea(it) }
+        }
+        if (!nested.isJsonObject) return null
+        val addr = nested.asJsonObject
+        return Address(
+            ubigeo = addr.stringOrNull("ubigeo"),
+            departamento = addr.stringOrNull("departamento"),
+            provincia = addr.stringOrNull("provincia"),
+            distrito = addr.stringOrNull("distrito"),
+            urbanizacion = addr.stringOrNull("urbanizacion"),
+            direccion = addr.stringOrNull("direccion"),
+            codLocal = addr.stringOrNull("cod_local"),
+        )
     }
+
+    private fun JsonObject.stringOrNull(key: String): String? =
+        get(key)?.takeIf { !it.isJsonNull }?.asString?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun mergeAddress(existing: Address?, incoming: Address): Address {
         if (existing == null) return incoming

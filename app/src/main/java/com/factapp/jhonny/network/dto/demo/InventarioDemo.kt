@@ -58,25 +58,88 @@ object InventarioDemo {
         return almacen
     }
 
+    const val ID_PRODUCTO_SERIES = "demo-producto-series"
+
     fun seriesDisponibles(
         companyRuc: String,
         catalogItemId: String,
         almacenId: String? = null,
     ): List<ProductoSerie> {
         val centralId = almacenPrincipal(companyRuc).id
-        if (almacenId != null && almacenId != centralId) return emptyList()
-        return when (catalogItemId) {
-            "demo-pc" -> listOf(
-                serie(companyRuc, "demo-pc", "ser-pc-1", "DL-SN-2026-00487"),
-                serie(companyRuc, "demo-pc", "ser-pc-2", "DL-SN-2026-00488"),
+        val surId = "demo-alm-sur"
+        val almacenEfectivo = almacenId ?: centralId
+
+        val exactas = when (catalogItemId) {
+            ID_PRODUCTO_SERIES -> seriesGeneradas(
+                companyRuc = companyRuc,
+                catalogItemId = catalogItemId,
+                almacenId = almacenEfectivo,
+                cantidad = 20,
+                prefijo = "PS-DEMO",
             )
+            "demo-pc" -> when (almacenEfectivo) {
+                centralId -> listOf(
+                    serie(companyRuc, "demo-pc", centralId, "ser-pc-1", "DL-SN-2026-00487"),
+                    serie(companyRuc, "demo-pc", centralId, "ser-pc-2", "DL-SN-2026-00488"),
+                    serie(companyRuc, "demo-pc", centralId, "ser-pc-3", "DL-SN-2026-00489"),
+                )
+                surId -> listOf(
+                    serie(companyRuc, "demo-pc", surId, "ser-pc-sur-1", "DL-SN-2026-00501"),
+                )
+                else -> emptyList()
+            }
+            "demo-monitor" -> when (almacenEfectivo) {
+                centralId -> listOf(
+                    serie(companyRuc, "demo-monitor", centralId, "ser-mon-1", "LG-MON-27-001"),
+                    serie(companyRuc, "demo-monitor", centralId, "ser-mon-2", "LG-MON-27-002"),
+                    serie(companyRuc, "demo-monitor", centralId, "ser-mon-3", "LG-MON-27-003"),
+                )
+                surId -> listOf(
+                    serie(companyRuc, "demo-monitor", surId, "ser-mon-sur-1", "LG-MON-27-101"),
+                    serie(companyRuc, "demo-monitor", surId, "ser-mon-sur-2", "LG-MON-27-102"),
+                )
+                else -> emptyList()
+            }
+            "demo-cel" -> when (almacenEfectivo) {
+                centralId -> listOf(
+                    serie(companyRuc, "demo-cel", centralId, "ser-cel-1", "SAM-A54-2026-001"),
+                    serie(companyRuc, "demo-cel", centralId, "ser-cel-2", "SAM-A54-2026-002"),
+                    serie(companyRuc, "demo-cel", centralId, "ser-cel-3", "SAM-A54-2026-003"),
+                    serie(companyRuc, "demo-cel", centralId, "ser-cel-4", "SAM-A54-2026-004"),
+                )
+                else -> emptyList()
+            }
             else -> emptyList()
+        }
+        return exactas
+    }
+
+    /** 20 series de ejemplo para un ítem del catálogo (p. ej. "Producto Series" sin filas en BD). */
+    fun seriesGeneradas(
+        companyRuc: String,
+        catalogItemId: String,
+        almacenId: String?,
+        cantidad: Int = 20,
+        prefijo: String = "PS",
+    ): List<ProductoSerie> {
+        val alm = almacenId?.takeIf { it.isNotBlank() } ?: almacenPrincipal(companyRuc).id
+        val slugProducto = catalogItemId.replace("-", "").take(8).uppercase()
+        val slugAlmacen = alm.replace("-", "").take(4).uppercase()
+        return (1..cantidad).map { n ->
+            serie(
+                companyRuc = companyRuc,
+                catalogItemId = catalogItemId,
+                almacenId = alm,
+                id = "gen-ser-$slugAlmacen-$slugProducto-$n",
+                numeroSerie = "$prefijo-$slugAlmacen-$slugProducto-${n.toString().padStart(3, '0')}",
+            )
         }
     }
 
     private fun serie(
         companyRuc: String,
         catalogItemId: String,
+        almacenId: String,
         id: String,
         numeroSerie: String,
     ) = ProductoSerie(
@@ -84,7 +147,7 @@ object InventarioDemo {
         companyRuc = companyRuc,
         catalogItemId = catalogItemId,
         numeroSerie = numeroSerie,
-        almacenId = "demo-alm-central",
+        almacenId = almacenId,
         estado = ProductoSerieEstado.DISPONIBLE,
     )
 
@@ -106,7 +169,7 @@ object InventarioDemo {
             lineas = listOf(
                 lineaCatalogoSinSerie("demo-01", 10.0),
                 lineaCatalogoConSerie(
-                    serie = serie(companyRuc, "demo-pc", "ser-pc-1", "DL-SN-2026-00487")
+                    serie = serie(companyRuc, "demo-pc", "demo-alm-central", "ser-pc-1", "DL-SN-2026-00487")
                         .copy(estado = ProductoSerieEstado.ENTREGADO, entregaId = "demo-ent-1"),
                 ),
             ),

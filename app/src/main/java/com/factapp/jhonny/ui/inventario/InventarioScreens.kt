@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.modelos.Usuario
 import com.factapp.jhonny.network.CatalogRepository
 import com.factapp.jhonny.network.InventarioRepository
+import com.factapp.jhonny.network.mensajeAuth
 import com.factapp.jhonny.network.dto.model.Almacen
 import com.factapp.jhonny.network.dto.model.CatalogItem
 import com.factapp.jhonny.network.dto.model.Movimiento
@@ -641,11 +642,14 @@ fun IngresosScreen(
 
     suspend fun recargar() {
         if (companyRuc.isBlank()) return
-        CatalogRepository.listarParaGestion(companyRuc, token).onSuccess { catalogoLista = it }
-        InventarioRepository.listarIngresos(companyRuc, token).onSuccess { ingresos = it }
-        InventarioRepository.listarAlmacenes(companyRuc, token).onSuccess { lista ->
-            almacenes = lista
-        }
+        CatalogRepository.listarParaGestion(companyRuc, token)
+            .onSuccess { catalogoLista = it }
+            .onFailure { error = it.mensajeAuth() }
+        InventarioRepository.listarIngresos(companyRuc, token)
+            .onSuccess { ingresos = it }
+            .onFailure { error = it.mensajeAuth() }
+        InventarioRepository.listarAlmacenes(companyRuc, token)
+            .onSuccess { lista -> almacenes = lista }
     }
 
     LaunchedEffect(companyRuc, token) {
@@ -779,14 +783,14 @@ fun IngresosScreen(
                     InventarioRepository.registrarEntrada(companyRuc, token, body)
                 }
                 resultado
-                    .onSuccess { mov ->
-                        ingresos = listOf(mov) + ingresos
+                    .onSuccess {
+                        withContext(Dispatchers.IO) { recargar() }
                         Toast.makeText(context, "Ingreso registrado", Toast.LENGTH_SHORT).show()
                     }
                     .onFailure {
                         Toast.makeText(
                             context,
-                            it.message ?: "No se pudo registrar",
+                            it.mensajeAuth(),
                             Toast.LENGTH_LONG,
                         ).show()
                     }
