@@ -26,9 +26,12 @@ fun CompanyDto.toEntityOrNull(): CompanyEntity? {
 }
 
 fun UsuarioDto.toEntity(): UsuarioEntity {
-    require(email.isNotBlank()) { "El servidor no devolvió email de usuario" }
+    val emailNormalizado = email.trim().lowercase()
+    if (emailNormalizado.isBlank()) {
+        throw IllegalStateException("El servidor no devolvió email de usuario")
+    }
     return UsuarioEntity(
-        email = email,
+        email = emailNormalizado,
         contrasena = contrasena,
         token = token,
         refreshToken = refreshToken,
@@ -41,14 +44,20 @@ fun UsuarioDto.toEntity(): UsuarioEntity {
     )
 }
 
-/** Login/refresh: fusiona tokens y almacén (raíz o `user`) con el perfil anidado. */
-fun UsuarioSesionApi.toUsuarioEntity(): UsuarioEntity = user.copy(
-    token = accessToken,
-    refreshToken = refreshToken,
-    almacenId = user.almacenId?.takeIf { it.isNotBlank() } ?: almacenId,
-    almacenNombre = user.almacenNombre?.takeIf { it.isNotBlank() } ?: almacenNombre,
-    almacenCodigo = user.almacenCodigo?.takeIf { it.isNotBlank() } ?: almacenCodigo,
-).toEntity()
+/** Login/refresh/me: fusiona tokens, almacén y configuración de empresa con el perfil anidado. */
+fun UsuarioSesionApi.toUsuarioEntity(): UsuarioEntity {
+    val empresa = configuracion?.empresa ?: user.company
+    return user.copy(
+        token = accessToken,
+        refreshToken = refreshToken,
+        almacenId = user.almacenId?.takeIf { it.isNotBlank() } ?: almacenId,
+        almacenNombre = user.almacenNombre?.takeIf { it.isNotBlank() } ?: almacenNombre,
+        almacenCodigo = user.almacenCodigo?.takeIf { it.isNotBlank() } ?: almacenCodigo,
+        company = empresa,
+        companyRuc = empresa?.ruc ?: user.companyRuc,
+        companyNombre = empresa?.nombre ?: user.companyNombre,
+    ).toEntity()
+}
 
 private fun UsuarioDto.companyDesdeCamposPlanos(): CompanyEntity? =
     companyRuc?.takeIf { it.isNotBlank() }?.let { ruc ->

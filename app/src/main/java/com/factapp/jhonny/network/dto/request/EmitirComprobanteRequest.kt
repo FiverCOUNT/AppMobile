@@ -22,13 +22,20 @@ data class EmitirComprobanteRequest(
     val facturas: List<Invoice>? = null,
     @SerializedName("motivo_nota")
     val motivoNota: String? = null,
+    @SerializedName("motivo_codigo")
+    val motivoCodigo: String? = null,
     val observaciones: String? = null,
+    @SerializedName("almacen_id")
+    val almacenId: String? = null,
 )
 
 data class EmitirLineaRequest(
     @SerializedName("catalog_item_id")
     val catalogItemId: String,
     val cantidad: Double,
+    /** Monto unitario con IGV a acreditar (NC por descuento / disminución). */
+    @SerializedName("precio_unitario")
+    val precioUnitario: Double? = null,
     /** IDs de series vendidas/despachadas en esta linea. */
     @SerializedName("serie_ids")
     val serieIds: List<String>? = null,

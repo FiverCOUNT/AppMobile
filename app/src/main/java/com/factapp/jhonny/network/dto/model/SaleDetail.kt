@@ -13,7 +13,7 @@ data class SaleDetail(
     val invoiceId: String? = null,
     @SerializedName(value = "catalog_item_id", alternate = ["cod_producto", "codigo"])
     val catalogItemId: String? = null,
-    @SerializedName(value = "descripcion", alternate = ["nombre"])
+    @SerializedName(value = "descripcion", alternate = ["nombre_snapshot"])
     val descripcion: String? = null,
     val nombre: String? = null,
     val cantidad: Double,
@@ -37,17 +37,28 @@ data class SaleDetail(
     @SerializedName(value = "producto_serie", alternate = ["serie"])
     val productoSerie: ProductoSerie? = null,
 ) {
+    private companion object {
+        private const val IGV_RATE = 0.18
+
+        private fun round4(value: Double): Double =
+            kotlin.math.round(value * 10000.0) / 10000.0
+    }
+
     val precioUnitario: Double
         get() = mtoPrecioUnitario ?: 0.0
 
     val subtotal: Double
-        get() = mtoValorVenta ?: (precioUnitario * cantidad)
+        get() = mtoValorVenta ?: if (tipAfeIgv == "10") {
+            round4(precioUnitario / (1 + IGV_RATE) * cantidad)
+        } else {
+            round4(precioUnitario * cantidad)
+        }
 
     val igv: Double
-        get() = mtoIgv ?: 0.0
+        get() = mtoIgv ?: if (tipAfeIgv == "10") round4(subtotal * IGV_RATE) else 0.0
 
     val total: Double
-        get() = totalFactura ?: (subtotal + igv)
+        get() = totalFactura ?: round4(subtotal + igv)
 
     val afectacionIgv: String
         get() = tipAfeIgv

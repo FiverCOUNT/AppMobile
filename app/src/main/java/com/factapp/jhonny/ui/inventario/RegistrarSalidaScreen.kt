@@ -64,26 +64,29 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.onFocusEvent
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.modelos.Usuario
+import com.factapp.jhonny.modelos.esAdmin
 import com.factapp.jhonny.network.CatalogRepository
 import com.factapp.jhonny.network.ClienteRepository
 import com.factapp.jhonny.network.InventarioRepository
+import com.factapp.jhonny.network.mensajeAuth
+import com.factapp.jhonny.network.dto.usaSeriesInventario
 import com.factapp.jhonny.network.dto.model.Almacen
 import com.factapp.jhonny.network.dto.model.CatalogItem
 import com.factapp.jhonny.network.dto.model.Cliente
-import com.factapp.jhonny.network.dto.demo.InventarioDemo
 import com.factapp.jhonny.network.dto.model.MovimientoCliente
 import com.factapp.jhonny.network.dto.model.ProductoSerie
 import com.factapp.jhonny.network.dto.request.RegistrarSalidaRequest
-import com.factapp.jhonny.network.dto.model.aMovimientoCliente
 import com.factapp.jhonny.network.dto.model.aRegistrarSalidaLineas
 import com.factapp.jhonny.network.dto.model.aLineaCatalogoItem
 import com.factapp.jhonny.network.dto.companyRucParaCatalogo
+import com.factapp.jhonny.network.dto.almacenIdParaOperaciones
 import com.factapp.jhonny.network.dto.disponibleParaSalida
 import com.factapp.jhonny.network.dto.model.lineasListasParaSalida
 import com.factapp.jhonny.network.dto.model.LineaCatalogoItem
@@ -91,8 +94,8 @@ import com.factapp.jhonny.network.dto.model.requireItem
 import com.factapp.jhonny.network.dto.formatCantidadConUnidad
 import com.factapp.jhonny.network.dto.hayStockPara
 import com.factapp.jhonny.network.dto.stockDisponible
+import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
-import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
 import com.factapp.jhonny.ui.components.sheetContentWithoutTopInset
 import com.factapp.jhonny.ui.emitir.CatalogoBuscarSheet
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
@@ -117,8 +120,10 @@ private enum class FiltroSeriesLista {
 fun RegistrarSalidaScreen(
     modifier: Modifier = Modifier,
     usuario: Usuario? = null,
+    clienteInicial: Cliente? = null,
     onVolver: () -> Unit = {},
     onRegistrada: () -> Unit = {},
+    onNuevoCliente: () -> Unit = {},
 ) {
     BackHandler(onBack = onVolver)
 
@@ -126,6 +131,8 @@ fun RegistrarSalidaScreen(
     val scope = rememberCoroutineScope()
     val companyRuc = usuario.companyRucParaCatalogo().orEmpty()
     val token = usuario?.token
+    val esAdmin = usuario?.esAdmin() == true
+    val almacenUsuarioId = usuario.almacenIdParaOperaciones()
 
     var cargandoDatos by remember { mutableStateOf(true) }
     var cargandoCatalogoAlmacen by remember { mutableStateOf(false) }
@@ -148,30 +155,43 @@ fun RegistrarSalidaScreen(
     var busquedaCliente by remember { mutableStateOf("") }
     var lineaSeriesId by remember { mutableStateOf<String?>(null) }
     var guardando by remember { mutableStateOf(false) }
+    var clienteInicialAplicado by remember(clienteInicial?.id) { mutableStateOf(false) }
 
     val productosDisponibles = remember(catalogoLista) {
         catalogoLista.filter { it.disponibleParaSalida() }
     }
 
-    val almacenOrigenEfectivo = when (tipoDestino) {
-        TipoDestinoSalida.TRASLADO -> almacenOrigenId
-        TipoDestinoSalida.CLIENTE -> almacenOrigenId ?: almacenes.firstOrNull()?.id
+    val almacenProcedenciaEfectivo = when (tipoDestino) {
+        TipoDestinoSalida.TRASLADO, TipoDestinoSalida.CLIENTE -> when {
+            !esAdmin -> almacenUsuarioId?.takeIf { id -> almacenes.any { it.id == id } }
+            else ->
+                almacenOrigenId
+                    ?: almacenUsuarioId?.takeIf { id -> almacenes.any { it.id == id } }
+                    ?: almacenes.firstOrNull()?.id
+        }
         null -> null
     }
-    val puedeAgregarProducto = !almacenOrigenEfectivo.isNullOrBlank() && !cargandoCatalogoAlmacen
+    val almacenesDestinoTraslado = remember(almacenes, almacenProcedenciaEfectivo) {
+        almacenes.filter { it.id != almacenProcedenciaEfectivo }
+    }
+    val almacenProcedenciaUsuario = remember(almacenes, almacenUsuarioId) {
+        almacenes.find { it.id == almacenUsuarioId }
+    }
+    val puedeAgregarProducto = !almacenProcedenciaEfectivo.isNullOrBlank() && !cargandoCatalogoAlmacen
     val tipoElegido = tipoDestino != null
 
     val destinoValido = when (tipoDestino) {
         TipoDestinoSalida.CLIENTE ->
             clienteSeleccionado != null || clienteDoc.isNotBlank()
         TipoDestinoSalida.TRASLADO ->
-            !almacenDestinoId.isNullOrBlank() && almacenDestinoId != almacenOrigenEfectivo
+            !almacenDestinoId.isNullOrBlank() &&
+                almacenDestinoId != almacenProcedenciaEfectivo
         null -> false
     }
 
     val puedeRegistrar = tipoElegido &&
-        !almacenOrigenEfectivo.isNullOrBlank() &&
         destinoValido &&
+        !almacenProcedenciaEfectivo.isNullOrBlank() &&
         !guardando &&
         lineas.lineasListasParaSalida()
 
@@ -182,7 +202,7 @@ fun RegistrarSalidaScreen(
         }
         cargandoDatos = true
         withContext(Dispatchers.IO) {
-            InventarioRepository.listarAlmacenes(companyRuc, token).onSuccess { lista ->
+            InventarioRepository.listarAlmacenes(companyRuc, token, todos = true).onSuccess { lista ->
                 almacenes = lista
             }
             ClienteRepository.listar(companyRuc, token).onSuccess { clientes = it }
@@ -190,12 +210,24 @@ fun RegistrarSalidaScreen(
         cargandoDatos = false
     }
 
-    LaunchedEffect(companyRuc, token, tipoDestino, almacenOrigenEfectivo) {
+    LaunchedEffect(cargandoDatos, clienteInicial, clientes) {
+        if (cargandoDatos || clienteInicial == null || clienteInicialAplicado) return@LaunchedEffect
+        tipoDestino = TipoDestinoSalida.CLIENTE
+        clienteSeleccionado = clientes.find { it.id == clienteInicial.id } ?: clienteInicial
+        clienteNombre = clienteInicial.razonSocial
+        clienteDoc = clienteInicial.numeroDoc
+        if (!esAdmin) {
+            almacenOrigenId = almacenUsuarioId
+        }
+        clienteInicialAplicado = true
+    }
+
+    LaunchedEffect(companyRuc, token, tipoDestino, almacenProcedenciaEfectivo) {
         if (companyRuc.isBlank() || tipoDestino == null) {
             catalogoLista = emptyList()
             return@LaunchedEffect
         }
-        val almacenId = almacenOrigenEfectivo
+        val almacenId = almacenProcedenciaEfectivo
         if (almacenId.isNullOrBlank()) {
             catalogoLista = emptyList()
             return@LaunchedEffect
@@ -215,26 +247,21 @@ fun RegistrarSalidaScreen(
         clienteSeleccionado = null
         clienteNombre = ""
         clienteDoc = ""
-        almacenOrigenId = when (tipo) {
-            TipoDestinoSalida.TRASLADO -> null
-            TipoDestinoSalida.CLIENTE -> almacenes.firstOrNull()?.id
-        }
+        almacenOrigenId = if (esAdmin) null else almacenUsuarioId
         catalogoLista = emptyList()
         lineas.clear()
     }
 
-    Scaffold(
+    suspend fun recargarClientes() {
+        ClienteRepository.listar(companyRuc, token).onSuccess { clientes = it }
+    }
+
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Nueva salida",
-                subtitulo = "Despacho de mercadería",
-                icono = Icons.Default.LocalShipping,
-                onVolver = onVolver,
-            )
-        },
+        titulo = "Nueva salida",
+        subtitulo = "Despacho de mercadería",
+        icono = Icons.Default.LocalShipping,
+        onVolver = onVolver,
     ) { padding ->
         if (cargandoDatos) {
             Box(
@@ -294,30 +321,65 @@ fun RegistrarSalidaScreen(
                         }
                         TipoDestinoSalida.TRASLADO -> {
                             Spacer(Modifier.height(20.dp))
+                            if (esAdmin) {
+                                val procedencias = almacenes.filter { it.id != almacenDestinoId }
+                                SeccionAlmacenes(
+                                    titulo = "Almacén de procedencia",
+                                    subtitulo = "Opcional — si no eliges, se usa tu almacén asignado",
+                                    almacenes = procedencias,
+                                    seleccionadoId = almacenOrigenId,
+                                    onSeleccionar = { id ->
+                                        almacenOrigenId = id
+                                        if (almacenDestinoId == id) almacenDestinoId = null
+                                        lineas.clear()
+                                    },
+                                    vacioMensaje = "Configura al menos un almacén de origen",
+                                    opcional = true,
+                                )
+                            } else {
+                                AlmacenAsignadoFijo(
+                                    titulo = "Almacén de procedencia",
+                                    subtitulo = "Tu almacén asignado",
+                                    almacen = almacenProcedenciaUsuario,
+                                    sinAlmacenMensaje = "Tu usuario no tiene almacén asignado. Contacta al administrador.",
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
                             SeccionAlmacenes(
-                                titulo = "Desde almacén",
-                                subtitulo = "Origen del stock",
-                                almacenes = almacenes,
-                                seleccionadoId = almacenOrigenEfectivo,
+                                titulo = "Almacén de destino",
+                                subtitulo = "Obligatorio — hacia dónde va el stock",
+                                almacenes = almacenesDestinoTraslado,
+                                seleccionadoId = almacenDestinoId,
                                 onSeleccionar = { id ->
-                                    almacenOrigenId = id
-                                    if (almacenDestinoId == id) almacenDestinoId = null
+                                    almacenDestinoId = id
+                                    if (esAdmin && almacenOrigenId == id) almacenOrigenId = null
                                     lineas.clear()
                                 },
-                            )
-                            Spacer(Modifier.height(16.dp))
-                            val destinos = almacenes.filter { it.id != almacenOrigenEfectivo }
-                            SeccionAlmacenes(
-                                titulo = "Hacia almacén",
-                                subtitulo = "Destino del traslado",
-                                almacenes = destinos,
-                                seleccionadoId = almacenDestinoId,
-                                onSeleccionar = { almacenDestinoId = it },
-                                vacioMensaje = "Necesitas al menos dos almacenes distintos",
                             )
                         }
                         TipoDestinoSalida.CLIENTE -> {
                             Spacer(Modifier.height(20.dp))
+                            if (esAdmin) {
+                                SeccionAlmacenes(
+                                    titulo = "Almacén de procedencia",
+                                    subtitulo = "Opcional — bodega de donde sale el stock",
+                                    almacenes = almacenes,
+                                    seleccionadoId = almacenOrigenId,
+                                    onSeleccionar = { id ->
+                                        almacenOrigenId = id
+                                        lineas.clear()
+                                    },
+                                    opcional = true,
+                                )
+                            } else {
+                                AlmacenAsignadoFijo(
+                                    titulo = "Almacén de procedencia",
+                                    subtitulo = "Tu almacén asignado",
+                                    almacen = almacenProcedenciaUsuario,
+                                    sinAlmacenMensaje = "Tu usuario no tiene almacén asignado. Contacta al administrador.",
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
                             Text(
                                 "Cliente destino",
                                 fontWeight = FontWeight.SemiBold,
@@ -326,45 +388,47 @@ fun RegistrarSalidaScreen(
                             )
                             Spacer(Modifier.height(8.dp))
                             OutlinedButton(
-                                onClick = { mostrarBuscarCliente = true },
+                                onClick = {
+                                    busquedaCliente = ""
+                                    mostrarBuscarCliente = true
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),
                                 border = BorderStroke(1.5.dp, C.accent),
                             ) {
-                                Icon(Icons.Default.Business, contentDescription = null, tint = C.accent)
+                                Icon(Icons.Default.Search, contentDescription = null, tint = C.accent)
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    "Buscar cliente registrado",
+                                    "Buscar, filtrar o agregar cliente",
                                     color = C.accent,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             }
-                            clienteSeleccionado?.let { cli ->
-                                Spacer(Modifier.height(8.dp))
-                                ClienteSeleccionadoCard(
-                                    nombre = cli.razonSocial,
-                                    documento = cli.etiquetaDocumento,
-                                    onQuitar = {
-                                        clienteSeleccionado = null
-                                        clienteNombre = ""
-                                        clienteDoc = ""
-                                    },
-                                )
-                            } ?: run {
-                                Spacer(Modifier.height(8.dp))
-                                SalidaCampoTexto(
-                                    value = clienteNombre,
-                                    onValueChange = { clienteNombre = it },
-                                    label = "Nombre / razón social",
-                                    placeholder = "Si no está en la lista",
-                                )
-                                Spacer(Modifier.height(8.dp))
-                                SalidaCampoTexto(
-                                    value = clienteDoc,
-                                    onValueChange = { clienteDoc = it.filter { c -> c.isDigit() } },
-                                    label = "RUC / DNI",
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                )
+                            when {
+                                clienteSeleccionado != null -> {
+                                    val cli = clienteSeleccionado!!
+                                    Spacer(Modifier.height(8.dp))
+                                    ClienteSeleccionadoCard(
+                                        nombre = cli.razonSocial,
+                                        documento = cli.etiquetaDocumento,
+                                        onQuitar = {
+                                            clienteSeleccionado = null
+                                            clienteNombre = ""
+                                            clienteDoc = ""
+                                        },
+                                    )
+                                }
+                                clienteDoc.isNotBlank() -> {
+                                    Spacer(Modifier.height(8.dp))
+                                    ClienteSeleccionadoCard(
+                                        nombre = clienteNombre.ifBlank { "Cliente manual" },
+                                        documento = clienteDoc,
+                                        onQuitar = {
+                                            clienteNombre = ""
+                                            clienteDoc = ""
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -413,10 +477,17 @@ fun RegistrarSalidaScreen(
                             Text("Agregar producto", color = C.accent, fontWeight = FontWeight.SemiBold)
                         }
 
-                        if (!puedeAgregarProducto && tipoDestino == TipoDestinoSalida.TRASLADO) {
+                        if (!puedeAgregarProducto && tipoDestino == TipoDestinoSalida.TRASLADO && almacenDestinoId.isNullOrBlank()) {
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                "Elige el almacén de origen para ver los productos con stock en esa bodega.",
+                                "Elige primero el almacén de destino.",
+                                fontSize = 13.sp,
+                                color = C.textSecondary,
+                            )
+                        } else if (!puedeAgregarProducto) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Configura un almacén de procedencia o asigna uno al usuario.",
                                 fontSize = 13.sp,
                                 color = C.textSecondary,
                             )
@@ -445,7 +516,7 @@ fun RegistrarSalidaScreen(
                                     linea = linea,
                                     onCantidadChange = { nueva ->
                                         val idx = lineas.indexOfFirst { it.requireItem().id == linea.requireItem().id }
-                                        if (idx >= 0 && !linea.requireItem().manejaSerie) {
+                                        if (idx >= 0 && !linea.requireItem().usaSeriesInventario) {
                                             val max = linea.requireItem().stockDisponible
                                             lineas[idx] = lineas[idx].copy(cantidad = nueva.coerceIn(0.0, max))
                                         }
@@ -465,24 +536,29 @@ fun RegistrarSalidaScreen(
                     Button(
                         onClick = {
                             val tipo = tipoDestino ?: return@Button
-                            val cliente = when (tipo) {
+                            val clienteId = when (tipo) {
+                                TipoDestinoSalida.CLIENTE -> clienteSeleccionado?.id
+                                TipoDestinoSalida.TRASLADO -> null
+                            }
+                            val clienteManual = when (tipo) {
                                 TipoDestinoSalida.CLIENTE -> {
-                                    clienteSeleccionado?.aMovimientoCliente()
-                                        ?: if (clienteDoc.isNotBlank()) {
-                                            MovimientoCliente(
-                                                tipoDoc = if (clienteDoc.length == 11) "6" else "1",
-                                                numeroDoc = clienteDoc,
-                                                razonSocial = clienteNombre.takeIf { it.isNotBlank() },
-                                            )
-                                        } else {
-                                            null
-                                        }
+                                    if (clienteId != null) {
+                                        null
+                                    } else if (clienteDoc.isNotBlank()) {
+                                        MovimientoCliente(
+                                            tipoDoc = if (clienteDoc.length == 11) "6" else "1",
+                                            numeroDoc = clienteDoc,
+                                            razonSocial = clienteNombre.takeIf { it.isNotBlank() },
+                                        )
+                                    } else {
+                                        null
+                                    }
                                 }
                                 TipoDestinoSalida.TRASLADO -> null
                             }
                             val request = RegistrarSalidaRequest(
                                 companyRuc = companyRuc,
-                                almacenId = requireNotNull(almacenOrigenEfectivo),
+                                almacenId = requireNotNull(almacenProcedenciaEfectivo),
                                 almacenDestinoId = if (tipo == TipoDestinoSalida.TRASLADO) {
                                     almacenDestinoId
                                 } else {
@@ -491,19 +567,28 @@ fun RegistrarSalidaScreen(
                                 comprobanteId = comprobanteId.takeIf { it.isNotBlank() },
                                 guiaRemisionId = guiaRemisionId.takeIf { it.isNotBlank() },
                                 lineas = lineas.aRegistrarSalidaLineas(),
-                                cliente = cliente,
+                                clienteId = clienteId,
+                                cliente = clienteManual,
                             )
                             guardando = true
                             scope.launch {
-                                val ok = withContext(Dispatchers.IO) {
+                                val result = withContext(Dispatchers.IO) {
                                     InventarioRepository.registrarSalida(companyRuc, token, request)
-                                        .isSuccess
                                 }
                                 guardando = false
-                                if (ok) {
-                                    onRegistrada()
-                                    onVolver()
-                                }
+                                result.fold(
+                                    onSuccess = {
+                                        onRegistrada()
+                                        onVolver()
+                                    },
+                                    onFailure = { error ->
+                                        Toast.makeText(
+                                            context,
+                                            error.mensajeAuth(),
+                                            Toast.LENGTH_LONG,
+                                        ).show()
+                                    },
+                                )
                             }
                         },
                         enabled = puedeRegistrar,
@@ -540,8 +625,8 @@ fun RegistrarSalidaScreen(
         onItemSeleccionado = { item ->
             if (lineas.none { it.requireItem().id == item.id }) {
                 lineas += item.aLineaCatalogoItem(
-                    cantidad = if (item.manejaSerie) 0.0 else 1.0,
-                    almacenId = almacenOrigenEfectivo,
+                    cantidad = if (item.usaSeriesInventario) 0.0 else 1.0,
+                    almacenId = almacenProcedenciaEfectivo,
                 )
             }
             mostrarBuscarProducto = false
@@ -565,13 +650,18 @@ fun RegistrarSalidaScreen(
             mostrarBuscarCliente = false
             busquedaCliente = ""
         },
+        onNuevoCliente = {
+            mostrarBuscarCliente = false
+            busquedaCliente = ""
+            onNuevoCliente()
+        },
     )
 
     val lineaSeries = lineas.firstOrNull { it.requireItem().id == lineaSeriesId }
     SalidaSeleccionSeriesSheet(
         visible = lineaSeries != null,
         companyRuc = companyRuc,
-        almacenId = almacenOrigenEfectivo.orEmpty(),
+        almacenId = almacenProcedenciaEfectivo.orEmpty(),
         token = token,
         catalogItem = lineaSeries?.catalogItem,
         seriesIniciales = lineaSeries?.series.orEmpty(),
@@ -583,13 +673,53 @@ fun RegistrarSalidaScreen(
                 lineas[idx] = lineas[idx].copy(
                     series = seleccionadas,
                     numerosSerie = emptyList(),
-                    almacenId = almacenOrigenEfectivo ?: seleccionadas.firstOrNull()?.almacenId,
+                    almacenId = almacenProcedenciaEfectivo ?: seleccionadas.firstOrNull()?.almacenId,
                     cantidad = seleccionadas.size.toDouble(),
                 )
             }
             lineaSeriesId = null
         },
     )
+}
+
+@Composable
+private fun AlmacenAsignadoFijo(
+    titulo: String,
+    subtitulo: String,
+    almacen: Almacen?,
+    sinAlmacenMensaje: String,
+) {
+    Text(titulo, fontWeight = FontWeight.SemiBold, color = C.primary, fontSize = 14.sp)
+    Text(subtitulo, fontSize = 12.sp, color = C.textSecondary)
+    Spacer(Modifier.height(8.dp))
+    if (almacen == null) {
+        Text(sinAlmacenMensaje, fontSize = 13.sp, color = Color(0xFFC62828))
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = C.accentSoft,
+        ) {
+            Row(
+                Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Business,
+                    contentDescription = null,
+                    tint = C.accent,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(almacen.nombre, fontWeight = FontWeight.Bold, color = C.primary)
+                    if (almacen.codigo.isNotBlank()) {
+                        Text(almacen.codigo, fontSize = 12.sp, color = C.textSecondary)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -600,9 +730,14 @@ private fun SeccionAlmacenes(
     seleccionadoId: String?,
     onSeleccionar: (String) -> Unit,
     vacioMensaje: String = "No hay almacenes configurados",
+    opcional: Boolean = false,
 ) {
     Text(titulo, fontWeight = FontWeight.SemiBold, color = C.primary, fontSize = 14.sp)
-    Text(subtitulo, fontSize = 12.sp, color = C.textSecondary)
+    Text(
+        if (opcional) "$subtitulo (opcional)" else subtitulo,
+        fontSize = 12.sp,
+        color = C.textSecondary,
+    )
     Spacer(Modifier.height(8.dp))
     if (almacenes.isEmpty()) {
         Text(vacioMensaje, fontSize = 13.sp, color = C.textSecondary)
@@ -686,7 +821,7 @@ private fun LineaSalidaEditor(
         modifier = Modifier
             .fillMaxWidth()
             .then(
-                if (linea.requireItem().manejaSerie) Modifier.clickable(onClick = onAbrirSeries)
+                if (linea.requireItem().usaSeriesInventario) Modifier.clickable(onClick = onAbrirSeries)
                 else Modifier,
             ),
         shape = RoundedCornerShape(12.dp),
@@ -709,7 +844,7 @@ private fun LineaSalidaEditor(
                 Text(
                     buildString {
                         linea.requireItem().codigo?.let { append("$it · ") }
-                        if (linea.requireItem().manejaSerie) {
+                        if (linea.requireItem().usaSeriesInventario) {
                             append("${linea.series.size} series · ")
                         } else {
                             append(
@@ -721,13 +856,13 @@ private fun LineaSalidaEditor(
                                 } · ",
                             )
                         }
-                        append(if (linea.requireItem().manejaSerie) "Elegir series" else "Cantidad")
+                        append(if (linea.requireItem().usaSeriesInventario) "Elegir series" else "Cantidad")
                     },
                     fontSize = 12.sp,
                     color = C.textSecondary,
                 )
             }
-            if (linea.requireItem().manejaSerie) {
+            if (linea.requireItem().usaSeriesInventario) {
                 IconButton(onClick = onAbrirSeries, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.Default.MoreHoriz, contentDescription = "Elegir series", tint = C.accent)
                 }

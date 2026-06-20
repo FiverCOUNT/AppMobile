@@ -56,6 +56,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.factapp.jhonny.network.dto.usaSeriesInventario
 import com.factapp.jhonny.network.dto.model.Almacen
 import com.factapp.jhonny.network.dto.model.CatalogItem
 import com.factapp.jhonny.network.dto.model.ProductoSerie
@@ -79,20 +80,52 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import com.factapp.jhonny.ui.emitir.CatalogoBuscarSheet
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.filled.Business
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.graphics.Color
+import com.factapp.jhonny.network.ClienteRepository
+import com.factapp.jhonny.network.InventarioRepository
+import com.factapp.jhonny.network.dto.model.Cliente
+import com.factapp.jhonny.network.dto.model.MovimientoCliente
+import com.factapp.jhonny.network.dto.model.ProductoDevolucionCliente
+import com.factapp.jhonny.ui.clientes.AgregarClienteSheet
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.background
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 private val C = ComprobanteEmitColors
+
+private enum class TipoIngreso {
+    PROVEEDOR,
+    DEVOLUCION_CLIENTE,
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegistrarIngresoSheet(
     visible: Boolean,
-    productosDisponibles: List<CatalogItem>,
+    catalogoCompleto: List<CatalogItem>,
     companyRuc: String,
+    token: String? = null,
     almacenes: List<Almacen>,
+    almacenIdDefault: String? = null,
+    almacenUsuarioId: String? = almacenIdDefault,
+    esAdmin: Boolean = false,
+    esDevolucionInicial: Boolean = false,
     onDismiss: () -> Unit,
     onRegistrar: (RegistrarEntradaRequest) -> Unit,
 ) {
     if (!visible) return
 
+    val scope = rememberCoroutineScope()
     val contentScrollState = rememberScrollState()
     val lineas = remember { mutableStateListOf<LineaCatalogoItem>() }
     var observaciones by remember { mutableStateOf("") }
@@ -101,15 +134,72 @@ fun RegistrarIngresoSheet(
     var lineaMenuSerieId by remember { mutableStateOf<String?>(null) }
     var lineaEscaneoSerieId by remember { mutableStateOf<String?>(null) }
     var almacenSeleccionadoId by remember { mutableStateOf<String?>(null) }
+    var tipoIngreso by remember {
+        mutableStateOf(
+            if (esDevolucionInicial) TipoIngreso.DEVOLUCION_CLIENTE else TipoIngreso.PROVEEDOR,
+        )
+    }
+    var clientes by remember { mutableStateOf<List<Cliente>>(emptyList()) }
+    var clienteSeleccionado by remember { mutableStateOf<Cliente?>(null) }
+    var clienteNombre by remember { mutableStateOf("") }
+    var clienteDoc by remember { mutableStateOf("") }
+    var mostrarBuscarCliente by remember { mutableStateOf(false) }
+    var mostrarAgregarCliente by remember { mutableStateOf(false) }
+    var busquedaCliente by remember { mutableStateOf("") }
+    var guardandoCliente by remember { mutableStateOf(false) }
+    var errorAgregarCliente by remember { mutableStateOf<String?>(null) }
+    var productosEntregados by remember { mutableStateOf<List<ProductoDevolucionCliente>>(emptyList()) }
+    var cargandoEntregados by remember { mutableStateOf(false) }
+    var lineaSeriesDevolucionId by remember { mutableStateOf<String?>(null) }
 
-    val almacenId = almacenSeleccionadoId
-        ?: almacenes.firstOrNull()?.id
-        .orEmpty()
+    val esDevolucion = tipoIngreso == TipoIngreso.DEVOLUCION_CLIENTE
+    val clienteIdDevolucion = clienteSeleccionado?.id
+
+    val productosBusqueda = remember(catalogoCompleto, tipoIngreso, productosEntregados) {
+        when (tipoIngreso) {
+            TipoIngreso.PROVEEDOR -> catalogoCompleto.filter { it.disponibleParaIngreso() }
+            TipoIngreso.DEVOLUCION_CLIENTE -> productosEntregados.map { it.aCatalogItem() }
+        }
+    }
+    val seriesEntregadasMap = remember(productosEntregados) {
+        productosEntregados.associate { it.catalogItemId to it.series }
+    }
+    val cantidadPendienteMap = remember(productosEntregados) {
+        productosEntregados.associate { it.catalogItemId to it.cantidadPendiente }
+    }
+    val almacenUsuarioEnLista = remember(almacenes, almacenUsuarioId) {
+        almacenUsuarioId?.takeIf { id -> almacenes.any { it.id == id } }
+    }
+    val fijaAlmacenDevolucion = esDevolucion && !esAdmin && almacenUsuarioEnLista != null
+    val almacenDestinoEfectivo = when {
+        fijaAlmacenDevolucion -> almacenUsuarioEnLista
+        else -> almacenSeleccionadoId
+    }
+    val almacenId = almacenDestinoEfectivo.orEmpty()
     val almacenNombre = almacenes.firstOrNull { it.id == almacenId }?.nombre
-    val puedeAgregarProducto = almacenId.isNotBlank()
-    val puedeRegistrar = almacenId.isNotBlank() && lineas.lineasListasParaIngreso()
+    val clienteValido = !esDevolucion || clienteSeleccionado != null || clienteDoc.isNotBlank()
+    val puedeAgregarProducto = when {
+        almacenDestinoEfectivo == null || almacenId.isBlank() -> false
+        !esDevolucion -> clienteValido
+        !clienteValido || clienteIdDevolucion.isNullOrBlank() -> false
+        cargandoEntregados -> false
+        else -> productosEntregados.isNotEmpty()
+    }
+    val puedeRegistrar = almacenDestinoEfectivo != null &&
+        almacenId.isNotBlank() &&
+        clienteValido &&
+        lineas.lineasListasParaIngreso()
 
-    LaunchedEffect(visible, almacenes) {
+    suspend fun recargarClientes() {
+        val resultado = withContext(Dispatchers.IO) {
+            ClienteRepository.listar(companyRuc, token)
+        }
+        withContext(Dispatchers.Main) {
+            resultado.onSuccess { clientes = it }
+        }
+    }
+
+    LaunchedEffect(visible, almacenes, almacenIdDefault, almacenUsuarioId, esDevolucionInicial) {
         if (visible) {
             lineas.clear()
             observaciones = ""
@@ -117,8 +207,53 @@ fun RegistrarIngresoSheet(
             busqueda = ""
             lineaMenuSerieId = null
             lineaEscaneoSerieId = null
-            almacenSeleccionadoId = almacenes.firstOrNull()?.id
+            lineaSeriesDevolucionId = null
+            productosEntregados = emptyList()
+            cargandoEntregados = false
+            tipoIngreso = if (esDevolucionInicial) {
+                TipoIngreso.DEVOLUCION_CLIENTE
+            } else {
+                TipoIngreso.PROVEEDOR
+            }
+            clienteSeleccionado = null
+            clienteNombre = ""
+            clienteDoc = ""
+            mostrarBuscarCliente = false
+            mostrarAgregarCliente = false
+            busquedaCliente = ""
+            val almacenUsuario = almacenUsuarioId?.takeIf { id -> almacenes.any { it.id == id } }
+            almacenSeleccionadoId = when {
+                esDevolucionInicial && !esAdmin && almacenUsuario != null -> almacenUsuario
+                else ->
+                    almacenIdDefault
+                        ?.takeIf { id -> almacenes.any { it.id == id } }
+                        ?: almacenes.singleOrNull()?.id
+            }
+            if (companyRuc.isNotBlank()) {
+                recargarClientes()
+            }
         }
+    }
+
+    LaunchedEffect(esDevolucion, fijaAlmacenDevolucion, almacenUsuarioEnLista) {
+        if (esDevolucion && fijaAlmacenDevolucion) {
+            almacenSeleccionadoId = almacenUsuarioEnLista
+        }
+    }
+
+    LaunchedEffect(esDevolucion, clienteIdDevolucion, companyRuc, token, visible) {
+        if (!visible || !esDevolucion || clienteIdDevolucion.isNullOrBlank()) {
+            productosEntregados = emptyList()
+            cargandoEntregados = false
+            return@LaunchedEffect
+        }
+        cargandoEntregados = true
+        val resultado = withContext(Dispatchers.IO) {
+            InventarioRepository.listarProductosDevolucion(companyRuc, token, clienteIdDevolucion)
+        }
+        productosEntregados = resultado.getOrElse { emptyList() }
+        lineas.clear()
+        cargandoEntregados = false
     }
 
     BackHandler(onBack = onDismiss)
@@ -129,9 +264,14 @@ fun RegistrarIngresoSheet(
         contentWindowInsets = scaffoldContentWithoutTopInset(),
         topBar = {
             EmitFormSheetHeader(
-                titulo = "Nuevo ingreso",
-                subtitulo = almacenNombre?.let { "Entrada a $it" }
-                    ?: "Mercadería que entra al almacén",
+                titulo = if (esDevolucion) "Devolución de cliente" else "Nuevo ingreso",
+                subtitulo = when {
+                    esDevolucion && clienteSeleccionado != null ->
+                        "Entrada a ${almacenNombre ?: "almacén"} · ${clienteSeleccionado!!.razonSocial}"
+                    esDevolucion -> "Mercadería que el cliente devuelve al almacén"
+                    almacenNombre != null -> "Entrada a $almacenNombre"
+                    else -> "Mercadería que entra al almacén"
+                },
                 icono = Icons.Default.Warehouse,
                 onVolver = onDismiss,
             )
@@ -152,19 +292,145 @@ fun RegistrarIngresoSheet(
             ) {
                 Spacer(modifier = Modifier.height(10.dp))
 
-                AlmacenSelectorSection(
-                    titulo = "Almacén de destino",
-                    subtitulo = "¿A qué bodega entra la mercadería?",
-                    almacenes = almacenes,
-                    seleccionadoId = almacenId.takeIf { it.isNotBlank() },
-                    onSeleccionar = { id ->
-                        if (id != almacenSeleccionadoId) {
-                            almacenSeleccionadoId = id
-                            lineas.clear()
-                        }
-                    },
-                    vacioMensaje = "Crea un almacén en Más opciones → Almacenes",
+                Text(
+                    "Tipo de ingreso",
+                    fontWeight = FontWeight.SemiBold,
+                    color = C.primary,
+                    fontSize = 14.sp,
                 )
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    IngresoFilterChip(
+                        label = "Proveedor / compra",
+                        selected = tipoIngreso == TipoIngreso.PROVEEDOR,
+                        onClick = {
+                            if (tipoIngreso != TipoIngreso.PROVEEDOR) {
+                                tipoIngreso = TipoIngreso.PROVEEDOR
+                                lineas.clear()
+                                clienteSeleccionado = null
+                                clienteDoc = ""
+                                clienteNombre = ""
+                            }
+                        },
+                    )
+                    IngresoFilterChip(
+                        label = "Devolución cliente",
+                        selected = esDevolucion,
+                        onClick = {
+                            if (!esDevolucion) {
+                                tipoIngreso = TipoIngreso.DEVOLUCION_CLIENTE
+                                lineas.clear()
+                            }
+                        },
+                    )
+                }
+
+                if (esDevolucion) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "Cliente que devuelve",
+                        fontWeight = FontWeight.SemiBold,
+                        color = C.primary,
+                        fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            busquedaCliente = ""
+                            mostrarBuscarCliente = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        border = BorderStroke(1.5.dp, C.accent),
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = C.accent)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Buscar, filtrar o agregar cliente",
+                            color = C.accent,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    when {
+                        clienteSeleccionado != null -> {
+                            val cli = clienteSeleccionado!!
+                            Spacer(Modifier.height(8.dp))
+                            IngresoClienteCard(
+                                nombre = cli.razonSocial,
+                                documento = cli.etiquetaDocumento,
+                                onQuitar = {
+                                    clienteSeleccionado = null
+                                    clienteDoc = ""
+                                    clienteNombre = ""
+                                    lineas.clear()
+                                },
+                            )
+                        }
+                        clienteDoc.isNotBlank() -> {
+                            Spacer(Modifier.height(8.dp))
+                            IngresoClienteCard(
+                                nombre = clienteNombre.ifBlank { "Cliente manual" },
+                                documento = clienteDoc,
+                                onQuitar = {
+                                    clienteDoc = ""
+                                    clienteNombre = ""
+                                    lineas.clear()
+                                },
+                            )
+                        }
+                        else -> {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Indica qué cliente devuelve la mercadería.",
+                                fontSize = 13.sp,
+                                color = C.textSecondary,
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (fijaAlmacenDevolucion) {
+                    AlmacenAsignadoSection(
+                        titulo = "Almacén de destino",
+                        subtitulo = "La mercadería devuelta ingresa a tu almacén asignado",
+                        almacen = almacenes.find { it.id == almacenUsuarioEnLista },
+                        sinAlmacenMensaje = "Tu usuario no tiene almacén asignado. Contacta al administrador.",
+                    )
+                } else {
+                    AlmacenSelectorSection(
+                        titulo = "Almacén de destino",
+                        subtitulo = if (esDevolucion) {
+                            "Obligatorio — ¿a qué bodega entra la mercadería devuelta?"
+                        } else {
+                            "Obligatorio — ¿a qué bodega entra la mercadería?"
+                        },
+                        almacenes = almacenes,
+                        seleccionadoId = almacenSeleccionadoId,
+                        onSeleccionar = { id ->
+                            if (id != almacenSeleccionadoId) {
+                                almacenSeleccionadoId = id
+                                lineas.clear()
+                            }
+                        },
+                        vacioMensaje = "Crea un almacén en Más opciones → Almacenes",
+                    )
+                }
+
+                if (!fijaAlmacenDevolucion && almacenes.size > 1 && almacenSeleccionadoId == null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Selecciona el almacén de destino para continuar.",
+                        fontSize = 13.sp,
+                        color = C.textSecondary,
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -180,19 +446,52 @@ fun RegistrarIngresoSheet(
                     Text("Agregar producto del catálogo", color = C.accent, fontWeight = FontWeight.SemiBold)
                 }
 
-                if (!puedeAgregarProducto) {
+                if (esDevolucion && cargandoEntregados) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            color = C.accent,
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text("Cargando productos entregados al cliente…", fontSize = 13.sp, color = C.textSecondary)
+                    }
+                } else if (!puedeAgregarProducto) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Selecciona el almacén de destino antes de agregar productos.",
+                        when {
+                            esDevolucion && clienteIdDevolucion.isNullOrBlank() ->
+                                "Elige un cliente registrado para ver qué productos puede devolver."
+                            esDevolucion && productosEntregados.isEmpty() ->
+                                "Este cliente no tiene productos entregados pendientes de devolución."
+                            esDevolucion && !clienteValido ->
+                                "Selecciona el cliente que devuelve antes de agregar productos."
+                            almacenDestinoEfectivo == null ->
+                                "Selecciona el almacén de destino antes de agregar productos."
+                            else -> "Completa los datos requeridos para agregar productos."
+                        },
                         fontSize = 13.sp,
                         color = C.textSecondary,
+                    )
+                } else if (esDevolucion) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "${productosEntregados.size} producto(s) entregado(s) a este cliente. En serializados, elige las series a devolver.",
+                        fontSize = 13.sp,
+                        color = C.textSecondary,
+                        lineHeight = 18.sp,
                     )
                 }
 
                 if (lineas.isEmpty()) {
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = "Elige productos activos con inventario. Si no hay ninguno, revisa el catálogo.",
+                        text = if (esDevolucion) {
+                            "Agrega los productos que el cliente está devolviendo."
+                        } else {
+                            "Elige productos activos con inventario. Si no hay ninguno, revisa el catálogo."
+                        },
                         fontSize = 13.sp,
                         color = C.textSecondary,
                         lineHeight = 18.sp,
@@ -206,17 +505,28 @@ fun RegistrarIngresoSheet(
                         items(lineas, key = { it.requireItem().id }) { linea ->
                             LineaIngresoEditor(
                                 linea = linea,
+                                esDevolucion = esDevolucion,
+                                maxCantidadDevolucion = cantidadPendienteMap[linea.requireItem().id],
                                 onCantidadChange = { nueva ->
                                     val idx = lineas.indexOfFirst { it.requireItem().id == linea.requireItem().id }
                                     if (idx >= 0) {
-                                        lineas[idx] = if (linea.requireItem().manejaSerie) {
+                                        lineas[idx] = if (linea.requireItem().usaSeriesInventario) {
                                             lineas[idx]
                                         } else {
-                                            lineas[idx].copy(cantidad = nueva)
+                                            val max = cantidadPendienteMap[linea.requireItem().id]
+                                            val cantidad = if (esDevolucion && max != null) {
+                                                nueva.coerceIn(0.0, max)
+                                            } else {
+                                                nueva
+                                            }
+                                            lineas[idx].copy(cantidad = cantidad)
                                         }
                                     }
                                 },
                                 onAbrirMenuSerial = { lineaMenuSerieId = linea.requireItem().id },
+                                onSeleccionarSeriesDevolucion = {
+                                    lineaSeriesDevolucionId = linea.requireItem().id
+                                },
                                 onEliminar = {
                                     lineas.removeAll { it.requireItem().id == linea.requireItem().id }
                                 },
@@ -231,7 +541,12 @@ fun RegistrarIngresoSheet(
                     onValueChange = { observaciones = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Observaciones (opcional)") },
-                    placeholder = { Text("Ej. Compra proveedor, nota de ingreso") },
+                    placeholder = {
+                        Text(
+                            if (esDevolucion) "Ej. Devolución por cambio, garantía…"
+                            else "Ej. Compra proveedor, nota de ingreso",
+                        )
+                    },
                     singleLine = false,
                     minLines = 2,
                     shape = RoundedCornerShape(12.dp),
@@ -241,13 +556,24 @@ fun RegistrarIngresoSheet(
                 Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = {
+                        val clienteId = if (esDevolucion) clienteSeleccionado?.id else null
+                        val clienteManual = if (esDevolucion && clienteId == null && clienteDoc.isNotBlank()) {
+                            MovimientoCliente(
+                                tipoDoc = if (clienteDoc.length == 11) "6" else "1",
+                                numeroDoc = clienteDoc,
+                                razonSocial = clienteNombre.takeIf { it.isNotBlank() },
+                            )
+                        } else {
+                            null
+                        }
                         val request = RegistrarEntradaRequest(
                             companyRuc = companyRuc,
                             almacenId = almacenId,
                             lineas = lineas.map { it.aRegistrarMovimientoLinea() },
                             observaciones = observaciones.takeIf { it.isNotBlank() },
+                            clienteId = clienteId,
+                            cliente = clienteManual,
                         )
-                        onDismiss()
                         onRegistrar(request)
                     },
                     enabled = puedeRegistrar,
@@ -255,7 +581,10 @@ fun RegistrarIngresoSheet(
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = C.accent),
                 ) {
-                    Text("Registrar ingreso", fontWeight = FontWeight.Bold)
+                    Text(
+                        if (esDevolucion) "Registrar devolución" else "Registrar ingreso",
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }
@@ -263,7 +592,7 @@ fun RegistrarIngresoSheet(
 
     CatalogoBuscarSheet(
         visible = mostrarBuscar,
-        items = productosDisponibles,
+        items = productosBusqueda,
         busqueda = busqueda,
         onBusquedaChange = { busqueda = it },
         onDismiss = {
@@ -273,7 +602,7 @@ fun RegistrarIngresoSheet(
         onItemSeleccionado = { item ->
             if (lineas.none { it.requireItem().id == item.id }) {
                 lineas += item.aLineaCatalogoItem(
-                    cantidad = if (item.manejaSerie) 0.0 else 1.0,
+                    cantidad = if (item.usaSeriesInventario) 0.0 else 1.0,
                     almacenId = almacenId,
                 )
             }
@@ -282,52 +611,323 @@ fun RegistrarIngresoSheet(
         },
     )
 
-    val lineaMenuSerie = lineas.firstOrNull { it.requireItem().id == lineaMenuSerieId }
-    IngresoSeriesActionSheet(
-        item = lineaMenuSerie?.catalogItem,
-        visible = lineaMenuSerie != null,
-        onDismiss = { lineaMenuSerieId = null },
-        onIngresoMasivo = {
-            lineaMenuSerieId = null
-            lineaEscaneoSerieId = it.id
-        },
-    )
+    if (!esDevolucion) {
+        val lineaMenuSerie = lineas.firstOrNull { it.requireItem().id == lineaMenuSerieId }
+        IngresoSeriesActionSheet(
+            item = lineaMenuSerie?.catalogItem,
+            visible = lineaMenuSerie != null,
+            onDismiss = { lineaMenuSerieId = null },
+            onIngresoMasivo = {
+                lineaMenuSerieId = null
+                lineaEscaneoSerieId = it.id
+            },
+        )
 
-    val lineaEscaneoSerie = lineas.firstOrNull { it.requireItem().id == lineaEscaneoSerieId }
-    EscaneoMasivoSeriesSheet(
-        visible = lineaEscaneoSerie != null,
-        companyRuc = companyRuc,
-        catalogItem = lineaEscaneoSerie?.catalogItem,
-        seriesIniciales = lineaEscaneoSerie?.series.orEmpty(),
-        onDismiss = { lineaEscaneoSerieId = null },
+        val lineaEscaneoSerie = lineas.firstOrNull { it.requireItem().id == lineaEscaneoSerieId }
+        EscaneoMasivoSeriesSheet(
+            visible = lineaEscaneoSerie != null,
+            companyRuc = companyRuc,
+            catalogItem = lineaEscaneoSerie?.catalogItem,
+            seriesIniciales = lineaEscaneoSerie?.series.orEmpty(),
+            onDismiss = { lineaEscaneoSerieId = null },
+            onConfirmar = { series ->
+                val idx = lineas.indexOfFirst { it.requireItem().id == lineaEscaneoSerie?.requireItem()?.id }
+                if (idx >= 0) {
+                    lineas[idx] = lineas[idx].copy(
+                        series = series,
+                        numerosSerie = series.map { it.numeroSerie },
+                        almacenId = almacenId,
+                        cantidad = series.size.toDouble(),
+                    )
+                }
+                lineaEscaneoSerieId = null
+            },
+        )
+    }
+
+    val lineaSeriesDevolucion = lineas.firstOrNull { it.requireItem().id == lineaSeriesDevolucionId }
+    DevolucionSeriesSheet(
+        visible = lineaSeriesDevolucion != null,
+        catalogItem = lineaSeriesDevolucion?.catalogItem,
+        seriesEntregadas = seriesEntregadasMap[lineaSeriesDevolucion?.requireItem()?.id].orEmpty(),
+        seriesIniciales = lineaSeriesDevolucion?.series.orEmpty(),
+        onDismiss = { lineaSeriesDevolucionId = null },
         onConfirmar = { series ->
-            val idx = lineas.indexOfFirst { it.requireItem().id == lineaEscaneoSerie?.requireItem()?.id }
+            val catalogId = lineaSeriesDevolucion?.requireItem()?.id ?: return@DevolucionSeriesSheet
+            val idx = lineas.indexOfFirst { it.requireItem().id == catalogId }
             if (idx >= 0) {
                 lineas[idx] = lineas[idx].copy(
                     series = series,
-                    numerosSerie = emptyList(),
+                    numerosSerie = series.map { it.numeroSerie },
                     almacenId = almacenId,
                     cantidad = series.size.toDouble(),
                 )
             }
-            lineaEscaneoSerieId = null
+            lineaSeriesDevolucionId = null
+        },
+    )
+
+    SalidaClienteBuscarSheet(
+        visible = mostrarBuscarCliente,
+        clientes = clientes,
+        busqueda = busquedaCliente,
+        onBusquedaChange = { busquedaCliente = it },
+        onDismiss = {
+            mostrarBuscarCliente = false
+            busquedaCliente = ""
+        },
+        onClienteSeleccionado = { cli ->
+            clienteSeleccionado = cli
+            clienteNombre = cli.razonSocial
+            clienteDoc = cli.numeroDoc
+            lineas.clear()
+            mostrarBuscarCliente = false
+            busquedaCliente = ""
+        },
+        onNuevoCliente = {
+            mostrarBuscarCliente = false
+            errorAgregarCliente = null
+            mostrarAgregarCliente = true
+        },
+    )
+
+    AgregarClienteSheet(
+        visible = mostrarAgregarCliente,
+        guardando = guardandoCliente,
+        error = errorAgregarCliente,
+        onDismiss = {
+            if (!guardandoCliente) {
+                mostrarAgregarCliente = false
+                errorAgregarCliente = null
+            }
+        },
+        onGuardar = { body ->
+            guardandoCliente = true
+            errorAgregarCliente = null
+            scope.launch {
+                val result = withContext(Dispatchers.IO) {
+                    ClienteRepository.crear(companyRuc, token, body)
+                }
+                guardandoCliente = false
+                result.onSuccess { cli ->
+                    mostrarAgregarCliente = false
+                    withContext(Dispatchers.IO) { recargarClientes() }
+                    clienteSeleccionado = cli
+                    clienteNombre = cli.razonSocial
+                    clienteDoc = cli.numeroDoc
+                    lineas.clear()
+                }.onFailure {
+                    errorAgregarCliente = it.message ?: "No se pudo registrar el cliente"
+                }
+            }
         },
     )
 }
 
 @Composable
+private fun IngresoFilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontSize = 13.sp) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = C.accent,
+            selectedLabelColor = Color.White,
+            containerColor = C.surfaceSoft,
+            labelColor = C.textPrimary,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = C.border.copy(alpha = 0.5f),
+            selectedBorderColor = C.accent,
+        ),
+    )
+}
+
+@Composable
+private fun IngresoClienteCard(
+    nombre: String,
+    documento: String,
+    onQuitar: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = C.accentSoft,
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Business, contentDescription = null, tint = C.accent)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(nombre, fontWeight = FontWeight.Bold, color = C.primary)
+                Text(documento, fontSize = 13.sp, color = C.accent)
+            }
+            TextButton(onClick = onQuitar) {
+                Text("Quitar", color = C.textSecondary)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DevolucionSeriesSheet(
+    visible: Boolean,
+    catalogItem: CatalogItem?,
+    seriesEntregadas: List<ProductoSerie>,
+    seriesIniciales: List<ProductoSerie>,
+    onDismiss: () -> Unit,
+    onConfirmar: (List<ProductoSerie>) -> Unit,
+) {
+    if (!visible || catalogItem == null) return
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val seleccionadas = remember(catalogItem.id) { mutableStateListOf<String>() }
+    var busquedaSeries by remember(catalogItem.id) { mutableStateOf("") }
+
+    val seriesFiltradas = remember(seriesEntregadas, busquedaSeries) {
+        if (busquedaSeries.isBlank()) seriesEntregadas
+        else {
+            val q = busquedaSeries.trim()
+            seriesEntregadas.filter { it.numeroSerie.contains(q, ignoreCase = true) }
+        }
+    }
+
+    LaunchedEffect(catalogItem.id, visible) {
+        if (!visible) return@LaunchedEffect
+        seleccionadas.clear()
+        seleccionadas.addAll(seriesIniciales.map { it.id })
+        busquedaSeries = ""
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = C.background,
+        contentWindowInsets = { sheetContentWithoutTopInset() },
+        dragHandle = null,
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            EmitFormSheetHeader(
+                titulo = "Series entregadas",
+                subtitulo = catalogItem.nombre,
+                mostrarDragHandle = true,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(C.background)
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 24.dp),
+            ) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = busquedaSeries,
+                    onValueChange = { busquedaSeries = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Filtrar por número de serie") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = C.accent) },
+                    trailingIcon = {
+                        if (busquedaSeries.isNotEmpty()) {
+                            IconButton(onClick = { busquedaSeries = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Limpiar", tint = C.textSecondary)
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = outlinedFieldColors(),
+                )
+                Spacer(Modifier.height(10.dp))
+                if (seriesEntregadas.isEmpty()) {
+                    Text(
+                        "No hay series pendientes de devolución para este producto.",
+                        color = C.textSecondary,
+                        fontSize = 13.sp,
+                    )
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.height(240.dp),
+                    ) {
+                        items(seriesFiltradas, key = { it.id }) { serie ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (seleccionadas.contains(serie.id)) seleccionadas.remove(serie.id)
+                                        else seleccionadas.add(serie.id)
+                                    },
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (seleccionadas.contains(serie.id)) C.accentSoft else C.surface,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (seleccionadas.contains(serie.id)) C.accent else C.border.copy(alpha = 0.35f),
+                                ),
+                            ) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Checkbox(
+                                        checked = seleccionadas.contains(serie.id),
+                                        onCheckedChange = { checked ->
+                                            if (checked) seleccionadas.add(serie.id)
+                                            else seleccionadas.remove(serie.id)
+                                        },
+                                    )
+                                    Text(serie.numeroSerie, color = C.textPrimary, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = {
+                        val elegidas = seriesEntregadas.filter { seleccionadas.contains(it.id) }
+                        onConfirmar(elegidas)
+                    },
+                    enabled = seleccionadas.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = C.accent),
+                ) {
+                    Text("Confirmar (${seleccionadas.size})", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun LineaIngresoEditor(
     linea: LineaCatalogoItem,
+    esDevolucion: Boolean = false,
+    maxCantidadDevolucion: Double? = null,
     onCantidadChange: (Double) -> Unit,
     onAbrirMenuSerial: () -> Unit,
+    onSeleccionarSeriesDevolucion: () -> Unit = {},
     onEliminar: () -> Unit,
 ) {
+    val item = linea.requireItem()
+    val onSerieClick = if (esDevolucion) onSeleccionarSeriesDevolucion else onAbrirMenuSerial
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .then(
-                if (linea.requireItem().manejaSerie) Modifier.clickable(onClick = onAbrirMenuSerial)
+                if (item.usaSeriesInventario) Modifier.clickable(onClick = onSerieClick)
                 else Modifier,
             ),
         shape = RoundedCornerShape(12.dp),
@@ -342,32 +942,33 @@ private fun LineaIngresoEditor(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(linea.requireItem().nombre, fontWeight = FontWeight.SemiBold, color = C.textPrimary, fontSize = 14.sp)
+                Text(item.nombre, fontWeight = FontWeight.SemiBold, color = C.textPrimary, fontSize = 14.sp)
 
                 Text(
                     text = buildString {
-                        linea.requireItem().codigo?.let { append("$it · ") }
-                        if (linea.requireItem().manejaSerie) {
-                            append("${linea.series.size} series capturadas · ")
+                        item.codigo?.let { append("$it · ") }
+                        if (item.usaSeriesInventario) {
+                            append("${linea.series.size} series · ")
+                            append(if (esDevolucion) "Elegir series entregadas" else "Producto serializado")
                         } else {
-                            linea.requireItem().etiquetaStock()?.let { append("$it · ") }
-                        }
-                        append(
-                            if (linea.requireItem().manejaSerie) {
-                                "Producto serializado"
+                            if (esDevolucion && maxCantidadDevolucion != null) {
+                                append("Pendiente: ${maxCantidadDevolucion.toInt()} · ")
                             } else {
-                                "Cantidad a ingresar"
-                            },
-                        )
+                                item.etiquetaStock()?.let { append("$it · ") }
+                            }
+                            append(if (esDevolucion) "Cantidad a devolver" else "Cantidad a ingresar")
+                        }
                     },
                     fontSize = 12.sp,
                     color = C.textSecondary,
                 )
             }
             Spacer(modifier = Modifier.width(2.dp))
-            if (linea.requireItem().manejaSerie) {
-                IconButton(onClick = onAbrirMenuSerial, modifier = Modifier.size(40.dp)) {
-                    Icon(Icons.Default.MoreHoriz, contentDescription = "Ingreso masivo de series", tint = C.accent)
+            if (item.usaSeriesInventario) {
+                if (!esDevolucion) {
+                    IconButton(onClick = onAbrirMenuSerial, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Default.MoreHoriz, contentDescription = "Ingreso masivo de series", tint = C.accent)
+                    }
                 }
             } else {
                 OutlinedTextField(

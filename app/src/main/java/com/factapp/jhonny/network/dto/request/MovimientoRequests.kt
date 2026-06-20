@@ -11,6 +11,29 @@ data class RegistrarEntradaRequest(
     val almacenId: String,
     val lineas: List<RegistrarMovimientoLineaRequest>,
     val observaciones: String? = null,
+    @SerializedName("cliente_id")
+    val clienteId: String? = null,
+    val cliente: MovimientoCliente? = null,
+) {
+    /** Payload enviado al API (RUC va en la URL). */
+    fun toApiBody(): RegistrarEntradaApiBody = RegistrarEntradaApiBody(
+        almacenId = almacenId,
+        lineas = lineas,
+        observaciones = observaciones,
+        clienteId = clienteId,
+        cliente = cliente,
+    )
+}
+
+/** Body real de `POST /empresas/{ruc}/inventario/entradas`. */
+data class RegistrarEntradaApiBody(
+    @SerializedName("almacen_id")
+    val almacenId: String,
+    val lineas: List<RegistrarMovimientoLineaRequest>,
+    val observaciones: String? = null,
+    @SerializedName("cliente_id")
+    val clienteId: String? = null,
+    val cliente: MovimientoCliente? = null,
 )
 
 /**
@@ -28,6 +51,9 @@ data class RegistrarSalidaRequest(
     @SerializedName("guia_remision_id")
     val guiaRemisionId: String? = null,
     val lineas: List<RegistrarMovimientoLineaRequest>,
+    @SerializedName("cliente_id")
+    val clienteId: String? = null,
+    /** Solo si no hay [clienteId]: el backend crea o reutiliza un registro en `clientes`. */
     val cliente: MovimientoCliente? = null,
 )
 

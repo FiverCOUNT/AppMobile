@@ -2,15 +2,25 @@ package com.factapp.jhonny.ui.inventario
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +58,46 @@ fun AlmacenSelectorSection(
                     selected = seleccionadoId == alm.id,
                     onClick = { onSeleccionar(alm.id) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun AlmacenAsignadoSection(
+    titulo: String,
+    subtitulo: String,
+    almacen: Almacen?,
+    sinAlmacenMensaje: String = "Usuario sin almacén asignado",
+) {
+    Text(titulo, fontWeight = FontWeight.SemiBold, color = C.primary, fontSize = 14.sp)
+    Text(subtitulo, fontSize = 12.sp, color = C.textSecondary)
+    Spacer(Modifier.height(8.dp))
+    if (almacen == null) {
+        Text(sinAlmacenMensaje, fontSize = 13.sp, color = C.textSecondary)
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = C.accentSoft,
+        ) {
+            Row(
+                Modifier.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Business,
+                    contentDescription = null,
+                    tint = C.accent,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(almacen.nombre, fontWeight = FontWeight.Bold, color = C.primary)
+                    if (almacen.codigo.isNotBlank()) {
+                        Text(almacen.codigo, fontSize = 12.sp, color = C.textSecondary)
+                    }
+                }
             }
         }
     }

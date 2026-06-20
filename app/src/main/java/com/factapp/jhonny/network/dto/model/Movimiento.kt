@@ -1,5 +1,8 @@
 package com.factapp.jhonny.network.dto.model
 
+import com.factapp.jhonny.network.dto.formatFechaHoraCompacto
+import com.factapp.jhonny.network.dto.formatFechaLegible
+import com.factapp.jhonny.network.dto.formatHoraLegible
 import com.google.gson.annotations.SerializedName
 
 /**
@@ -14,8 +17,8 @@ data class Movimiento(
     @SerializedName("almacen_id")
     val almacenId: String,
     val tipo: MovimientoTipo,
-    val lineas: List<LineaCatalogoItem>,
-    val fecha: String,
+    val lineas: List<LineaCatalogoItem> = emptyList(),
+    val fecha: Long,
     val observaciones: String? = null,
     @SerializedName("referencia_tipo")
     val referenciaTipo: String? = null,
@@ -36,17 +39,33 @@ data class Movimiento(
     val guiaRemision: Invoice? = null,
     val cliente: MovimientoCliente? = null,
     @SerializedName("fecha_despacho")
-    val fechaDespacho: String? = null,
+    val fechaDespacho: Long? = null,
 ) {
     val numeroDisplay: String
         get() = numero ?: id
 
-    val fechaEfectiva: String
+    val fechaEfectiva: Long
         get() = fechaDespacho ?: fecha
 
     val tieneGuiaRemision: Boolean
         get() = !guiaRemisionId.isNullOrBlank() || guiaRemision != null
+
+    /** Gson puede dejar [lineas] en null aunque el tipo sea no anulable. */
+    val lineasSeguras: List<LineaCatalogoItem>
+        get() = lineas ?: emptyList()
 }
+
+/** Normaliza respuestas del API antes de usarlas en UI (evita NPE en listas). */
+fun Movimiento.sanitizarDesdeApi(): Movimiento = copy(
+    lineas = lineasSeguras.map { it.sanitizarDesdeApi() },
+)
+
+fun LineaCatalogoItem.sanitizarDesdeApi(): LineaCatalogoItem = copy(
+    catalogItemId = catalogItemId ?: "",
+    cantidad = cantidad ?: 0.0,
+    numerosSerie = numerosSerie ?: emptyList(),
+    series = series ?: emptyList(),
+)
 
 fun Movimiento.etiquetaGuiaRemision(): String? =
     guiaRemision?.etiqueta ?: guiaRemisionId?.takeIf { it.isNotBlank() }
@@ -95,13 +114,17 @@ fun Movimiento.etiquetaDestino(almacenes: Map<String, Almacen> = emptyMap()): St
 }
 
 fun Movimiento.etiquetaTipoHistorial(): String = when (tipo) {
-    MovimientoTipo.ENTRADA -> "Ingreso"
+    MovimientoTipo.ENTRADA -> if (referenciaTipo == "DEVOLUCION_CLIENTE") "Devolución" else "Ingreso"
     MovimientoTipo.SALIDA -> if (almacenDestinoId != null) "Traslado" else "Salida"
     MovimientoTipo.AJUSTE -> "Ajuste"
 }
 
 fun Movimiento.tituloHistorial(): String = when (tipo) {
-    MovimientoTipo.ENTRADA -> "Ingreso al almacén"
+    MovimientoTipo.ENTRADA -> if (referenciaTipo == "DEVOLUCION_CLIENTE") {
+        "Devolución ${numeroDisplay}"
+    } else {
+        "Ingreso al almacén"
+    }
     MovimientoTipo.SALIDA -> if (almacenDestinoId != null) {
         "Traslado ${numeroDisplay}"
     } else {
@@ -111,7 +134,7 @@ fun Movimiento.tituloHistorial(): String = when (tipo) {
 }
 
 fun Movimiento.resumenProductos(catalogo: Map<String, CatalogItem> = emptyMap()): String {
-    val nombres = lineas
+    val nombres = lineasSeguras
         .map { catalogo[it.catalogItemId]?.nombre ?: it.nombreEfectivo }
         .distinct()
     return when (nombres.size) {
@@ -124,8 +147,8 @@ fun Movimiento.resumenProductos(catalogo: Map<String, CatalogItem> = emptyMap())
 
 fun Movimiento.detalleHistorial(catalogo: Map<String, CatalogItem> = emptyMap()): String {
     observaciones?.takeIf { it.isNotBlank() }?.let { return it }
-    val totalUds = lineas.sumOf { it.cantidad }
-    val conSeries = lineas.any { it.tieneSeries }
+    val totalUds = lineasSeguras.sumOf { it.cantidad }
+    val conSeries = lineasSeguras.any { it.tieneSeries }
     return buildString {
         append(resumenProductos(catalogo))
         append(" · ")
@@ -134,25 +157,11 @@ fun Movimiento.detalleHistorial(catalogo: Map<String, CatalogItem> = emptyMap())
     }
 }
 
-fun Movimiento.fechaLegible(): String = fechaIsoLegible(fechaEfectiva)
+fun Movimiento.fechaLegible(): String = fechaEfectiva.formatFechaLegible()
 
-fun Movimiento.horaLegible(): String? {
-    val f = fechaEfectiva
-    if (f.length < 16 || f[10] != 'T') return null
-    return f.substring(11, 16)
-}
+fun Movimiento.horaLegible(): String? = fechaEfectiva.formatHoraLegible()
 
-fun fechaIsoLegible(fecha: String): String {
-    val parte = fecha.take(10)
-    val partes = parte.split("-")
-    if (partes.size != 3) return parte
-    val meses = listOf(
-        "ene", "feb", "mar", "abr", "may", "jun",
-        "jul", "ago", "sep", "oct", "nov", "dic",
-    )
-    val mes = partes[1].toIntOrNull()?.minus(1)?.let { meses.getOrNull(it) } ?: partes[1]
-    return "${partes[2].toIntOrNull() ?: partes[2]} $mes ${partes[0]}"
-}
+fun Movimiento.fechaHoraCompacto(): String = fechaEfectiva.formatFechaHoraCompacto()
 
 fun nombreAlmacenHistorial(almacenes: Map<String, Almacen>, id: String?): String =
     when {
@@ -162,17 +171,29 @@ fun nombreAlmacenHistorial(almacenes: Map<String, Almacen>, id: String?): String
 
 fun Movimiento.etiquetaAlmacenOrigenHistorial(almacenes: Map<String, Almacen>): String =
     when (tipo) {
-        MovimientoTipo.ENTRADA -> "Recepción externa"
+        MovimientoTipo.ENTRADA -> when (referenciaTipo) {
+            "DEVOLUCION_CLIENTE" -> {
+                val c = cliente
+                when {
+                    c == null -> "Cliente"
+                    !c.razonSocial.isNullOrBlank() -> c.razonSocial
+                    else -> "Doc. ${c.numeroDoc}"
+                }
+            }
+            else -> "Recepción externa"
+        }
         else -> nombreAlmacenHistorial(almacenes, almacenId)
     }
 
 fun Movimiento.etiquetaAlmacenDestinoHistorial(almacenes: Map<String, Almacen>): String =
-    when {
-        almacenDestinoId != null -> nombreAlmacenHistorial(almacenes, almacenDestinoId)
-        cliente != null -> {
-            val c = cliente
-            c.razonSocial?.takeIf { it.isNotBlank() } ?: "Doc. ${c.numeroDoc}"
+    when (tipo) {
+        MovimientoTipo.ENTRADA -> nombreAlmacenHistorial(almacenes, almacenId)
+        else -> when {
+            almacenDestinoId != null -> nombreAlmacenHistorial(almacenes, almacenDestinoId)
+            cliente != null -> {
+                val c = cliente
+                c.razonSocial?.takeIf { it.isNotBlank() } ?: "Doc. ${c.numeroDoc}"
+            }
+            else -> "—"
         }
-        tipo == MovimientoTipo.ENTRADA -> nombreAlmacenHistorial(almacenes, almacenId)
-        else -> "—"
     }

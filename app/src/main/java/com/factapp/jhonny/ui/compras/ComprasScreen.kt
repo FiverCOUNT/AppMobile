@@ -46,19 +46,23 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.modelos.Usuario
 import com.factapp.jhonny.network.ComprobanteRepository
+import com.factapp.jhonny.network.dto.fechaEmisionLegible
+import com.factapp.jhonny.network.dto.model.Company
 import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.model.ComprobanteEstado
 import com.factapp.jhonny.network.dto.colorArgb
 import com.factapp.jhonny.network.dto.companyRucParaCatalogo
+import com.factapp.jhonny.network.dto.emisorParaPdf
 import com.factapp.jhonny.network.dto.etiqueta
 import com.factapp.jhonny.network.dto.etiquetaTipo
 import com.factapp.jhonny.network.dto.formatearSoles
 import com.factapp.jhonny.network.dto.tieneCdrZip
 import com.factapp.jhonny.network.dto.tienePdf
 import com.factapp.jhonny.ui.catalogo.CatalogoBusquedaBar
-import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
-import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
+import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -87,6 +91,7 @@ fun ComprasScreen(
 
     val companyRuc = usuario.companyRucParaCatalogo().orEmpty()
     val token = usuario?.token
+    val emisorPdf = usuario.emisorParaPdf()
 
     var compras by remember { mutableStateOf<List<Invoice>>(emptyList()) }
     var cargando by remember { mutableStateOf(true) }
@@ -119,18 +124,12 @@ fun ComprasScreen(
         cargando = false
     }
 
-    Scaffold(
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Compras",
-                subtitulo = subtituloHeader,
-                icono = Icons.Default.ShoppingCart,
-                onVolver = onVolver,
-            )
-        },
+        titulo = "Compras",
+        subtitulo = subtituloHeader,
+        icono = Icons.Default.ShoppingCart,
+        onVolver = onVolver,
     ) { padding ->
         Column(
             modifier = Modifier
@@ -190,6 +189,9 @@ fun ComprasScreen(
                             items(filtradas, key = { it.id }) { compra ->
                                 CompraCard(
                                     compra = compra,
+                                    companyRuc = companyRuc,
+                                    token = token,
+                                    emisorFallback = emisorPdf,
                                     modifier = Modifier.padding(horizontal = 16.dp),
                                     onClick = { compraDetalle = compra },
                                 )
@@ -205,16 +207,24 @@ fun ComprasScreen(
     CompraDetalleSheet(
         compra = compraDetalle,
         onDismiss = { compraDetalle = null },
+        companyRuc = companyRuc,
+        token = token,
+        emisorFallback = emisorPdf,
     )
 }
 
 @Composable
 private fun CompraCard(
     compra: Invoice,
+    companyRuc: String,
+    token: String?,
+    emisorFallback: Company? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var descargandoPdf by remember(compra.id) { mutableStateOf(false) }
     val estadoColor = Color(compra.estado.colorArgb())
     val muestraDocumentos = compra.tienePdf() || compra.tieneCdrZip()
 
@@ -274,9 +284,9 @@ private fun CompraCard(
                         color = C.primary,
                         fontSize = 16.sp,
                     )
-                    compra.fechaEmision?.let {
+                    compra.fechaEmisionLegible()?.let {
                         Text(
-                            text = it.take(10),
+                            text = it,
                             fontSize = 11.sp,
                             color = C.textSecondary,
                         )
@@ -328,16 +338,41 @@ private fun CompraCard(
             ) {
                 if (compra.tienePdf()) {
                     TextButton(
-                        onClick = { ComprobanteDocumentIntents.abrirPdf(context, compra) },
+                        enabled = !descargandoPdf,
+                        onClick = {
+                            descargandoPdf = true
+                            scope.launch {
+                                ComprobanteDocumentIntents.abrirPdf(
+                                    context = context,
+                                    comprobante = compra,
+                                    companyRuc = companyRuc,
+                                    token = token,
+                                    emisorFallback = emisorFallback,
+                                )
+                                descargandoPdf = false
+                            }
+                        },
                     ) {
-                        Icon(
-                            Icons.Outlined.PictureAsPdf,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = C.accent,
-                        )
+                        if (descargandoPdf) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = C.accent,
+                            )
+                        } else {
+                            Icon(
+                                Icons.Outlined.PictureAsPdf,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = C.accent,
+                            )
+                        }
                         Spacer(Modifier.size(6.dp))
-                        Text("Descargar PDF", fontSize = 13.sp, color = C.accent)
+                        Text(
+                            if (descargandoPdf) "Abriendo…" else "Ver PDF",
+                            fontSize = 13.sp,
+                            color = C.accent,
+                        )
                     }
                 }
                 if (compra.tieneCdrZip()) {

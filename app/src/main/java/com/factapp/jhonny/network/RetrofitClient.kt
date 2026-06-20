@@ -16,14 +16,16 @@ object RetrofitClient {
 
     private val gson = GsonBuilder()
         .setLenient()
+        .registerTypeAdapter(Long::class.javaPrimitiveType, EpochMillisTypeAdapter())
+        .registerTypeAdapter(Long::class.javaObjectType, NullableEpochMillisTypeAdapter())
         .registerTypeAdapter(Address::class.java, AddressTypeAdapter())
         .registerTypeAdapter(Company::class.java, CompanyTypeAdapter())
         .create()
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
     private val retrofit: Retrofit = Retrofit.Builder()

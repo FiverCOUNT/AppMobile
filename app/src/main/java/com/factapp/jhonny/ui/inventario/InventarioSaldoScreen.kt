@@ -49,8 +49,7 @@ import com.factapp.jhonny.network.dto.model.filtrarPorBusqueda
 import com.factapp.jhonny.network.mensajeAuth
 import com.factapp.jhonny.ui.catalogo.CatalogoAlmacenBar
 import com.factapp.jhonny.ui.catalogo.CatalogoBusquedaBar
-import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
-import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
+import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -164,18 +163,12 @@ fun InventarioSaldoScreen(
         }
     }
 
-    Scaffold(
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Inventario",
-                subtitulo = subtituloHeader,
-                icono = Icons.Default.Inventory2,
-                onVolver = onVolver,
-            )
-        },
+        titulo = "Inventario",
+        subtitulo = subtituloHeader,
+        icono = Icons.Default.Inventory2,
+        onVolver = onVolver,
     ) { innerPadding ->
         Column(
             modifier = Modifier

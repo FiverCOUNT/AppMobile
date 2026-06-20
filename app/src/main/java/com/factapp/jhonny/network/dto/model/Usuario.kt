@@ -72,5 +72,6 @@ data class UsuarioSesionApi(
     val almacenNombre: String? = null,
     @SerializedName("almacenCodigo", alternate = ["almacen_codigo"])
     val almacenCodigo: String? = null,
+    val configuracion: ConfiguracionSesionApi? = null,
     val user: Usuario,
 )

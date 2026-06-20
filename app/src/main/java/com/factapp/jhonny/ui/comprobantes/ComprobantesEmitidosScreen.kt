@@ -22,7 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ReceiptLong
-import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -44,6 +44,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,32 +55,44 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.modelos.Usuario
 import com.factapp.jhonny.network.ComprobanteRepository
-import com.factapp.jhonny.network.dto.model.Invoice
+import com.factapp.jhonny.network.dto.model.Company
 import com.factapp.jhonny.network.dto.model.ComprobanteEstado
+import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.colorArgb
 import com.factapp.jhonny.network.dto.companyRucParaCatalogo
+import com.factapp.jhonny.network.dto.emisorParaPdf
 import com.factapp.jhonny.network.dto.etiqueta
 import com.factapp.jhonny.network.dto.etiquetaTipo
+import com.factapp.jhonny.network.dto.fechaEmisionLegible
 import com.factapp.jhonny.network.dto.filtrarPorRango
 import com.factapp.jhonny.network.dto.formatearDiaElegante
 import com.factapp.jhonny.network.dto.formatearRangoElegante
 import com.factapp.jhonny.network.dto.formatearSoles
+import com.factapp.jhonny.network.dto.motivoRechazoSunat
+import com.factapp.jhonny.network.dto.puedeReenviar
 import com.factapp.jhonny.network.dto.tienePdf
+import androidx.compose.material.icons.outlined.PictureAsPdf
+import androidx.compose.material.icons.outlined.Receipt
+import com.factapp.jhonny.network.ComprobanteRepository.PdfFormato
 import com.factapp.jhonny.ui.catalogo.CatalogoBusquedaBar
 import com.factapp.jhonny.ui.comprobantes.DetalleComprobanteModo
 import com.factapp.jhonny.ui.compras.CompraDetalleSheet
 import com.factapp.jhonny.ui.compras.ComprobanteDocumentIntents
-import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
-import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
+import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.YearMonth
+
+private val ZONA_PERU: ZoneId = ZoneId.of("America/Lima")
 
 private val C = ComprobanteEmitColors
 
 private enum class PresetFecha {
+    TODOS,
     HOY,
     AYER,
     ULTIMOS_7,
@@ -87,7 +100,8 @@ private enum class PresetFecha {
     FECHA,
 }
 
-private fun PresetFecha.rango(hoy: LocalDate, fechaElegida: LocalDate): Pair<LocalDate, LocalDate> = when (this) {
+private fun PresetFecha.rango(hoy: LocalDate, fechaElegida: LocalDate): Pair<LocalDate, LocalDate>? = when (this) {
+    PresetFecha.TODOS -> null
     PresetFecha.HOY -> hoy to hoy
     PresetFecha.AYER -> hoy.minusDays(1) to hoy.minusDays(1)
     PresetFecha.ULTIMOS_7 -> hoy.minusDays(6) to hoy
@@ -114,36 +128,44 @@ private fun List<Invoice>.filtrarBusqueda(query: String): List<Invoice> {
 fun ComprobantesEmitidosScreen(
     modifier: Modifier = Modifier,
     usuario: Usuario? = null,
-    onVolver: () -> Unit = {},
+    onVolver: (() -> Unit)? = null,
 ) {
-    BackHandler(onBack = onVolver)
+    BackHandler(enabled = onVolver != null, onBack = { onVolver?.invoke() })
 
     val companyRuc = usuario.companyRucParaCatalogo().orEmpty()
     val token = usuario?.token
+    val emisorPdf = usuario.emisorParaPdf()
     val hoy = remember { LocalDate.now() }
 
     var todos by remember { mutableStateOf<List<Invoice>>(emptyList()) }
     var cargando by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var busqueda by remember { mutableStateOf("") }
-    var preset by remember { mutableStateOf(PresetFecha.HOY) }
+    var preset by remember { mutableStateOf(PresetFecha.ULTIMOS_7) }
     var fechaElegida by remember { mutableStateOf(hoy) }
     var mostrarDatePicker by remember { mutableStateOf(false) }
     var detalle by remember { mutableStateOf<Invoice?>(null) }
+    var refreshKey by remember { mutableStateOf(0) }
 
     val rango by remember(preset, fechaElegida, hoy) {
         derivedStateOf { preset.rango(hoy, fechaElegida) }
     }
 
-    LaunchedEffect(companyRuc, token, rango) {
+    LaunchedEffect(companyRuc, token, preset, rango, refreshKey) {
+        if (companyRuc.isBlank()) {
+            cargando = false
+            error = "Sin empresa vinculada"
+            todos = emptyList()
+            return@LaunchedEffect
+        }
         cargando = true
         error = null
         withContext(Dispatchers.IO) {
             ComprobanteRepository.listarEmitidos(
                 companyRuc = companyRuc,
                 token = token,
-                desde = rango.first,
-                hasta = rango.second,
+                desde = rango?.first,
+                hasta = rango?.second,
             )
                 .onSuccess { todos = it }
                 .onFailure { error = it.message ?: "No se pudieron cargar los comprobantes" }
@@ -151,18 +173,26 @@ fun ComprobantesEmitidosScreen(
         cargando = false
     }
 
-    val porFecha by remember(todos, rango) {
-        derivedStateOf { todos.filtrarPorRango(rango.first, rango.second) }
+    val porFecha by remember(todos, rango, preset) {
+        derivedStateOf {
+            val rangoActual = rango
+            if (preset == PresetFecha.TODOS || rangoActual == null) todos
+            else todos.filtrarPorRango(rangoActual.first, rangoActual.second, ZONA_PERU)
+        }
     }
 
     val filtradas by remember(porFecha, busqueda) {
         derivedStateOf { porFecha.filtrarBusqueda(busqueda) }
     }
 
-    val subtituloHeader by remember(filtradas.size, rango) {
+    val subtituloHeader by remember(filtradas.size, rango, preset) {
         derivedStateOf {
-            val (ini, fin) = rango
-            val periodo = if (ini == fin) formatearDiaElegante(ini) else formatearRangoElegante(ini, fin)
+            val rangoActual = rango
+            val periodo = when {
+                preset == PresetFecha.TODOS || rangoActual == null -> "todos los periodos"
+                rangoActual.first == rangoActual.second -> formatearDiaElegante(rangoActual.first)
+                else -> formatearRangoElegante(rangoActual.first, rangoActual.second)
+            }
             "${filtradas.size} documento(s) · $periodo"
         }
     }
@@ -199,18 +229,12 @@ fun ComprobantesEmitidosScreen(
         }
     }
 
-    Scaffold(
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Comprobantes emitidos",
-                subtitulo = subtituloHeader,
-                icono = Icons.Default.ReceiptLong,
-                onVolver = onVolver,
-            )
-        },
+        titulo = "Comprobantes emitidos",
+        subtitulo = subtituloHeader,
+        icono = Icons.Default.ReceiptLong,
+        onVolver = onVolver,
     ) { padding ->
         Column(
             Modifier
@@ -222,7 +246,9 @@ fun ComprobantesEmitidosScreen(
                     CircularProgressIndicator(color = C.accent)
                 }
                 error != null -> Box(
-                    Modifier.fillMaxSize().padding(24.dp),
+                    Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(error!!, color = C.textSecondary)
@@ -233,7 +259,9 @@ fun ComprobantesEmitidosScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         item {
-                            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                            Column(
+                                Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            ) {
                                 FiltroFechaEmitidosCard(
                                     rango = rango,
                                     preset = preset,
@@ -274,12 +302,16 @@ fun ComprobantesEmitidosScreen(
                             items(filtradas, key = { it.id }) { doc ->
                                 ComprobanteEmitidoCard(
                                     doc = doc,
+                                    companyRuc = companyRuc,
+                                    token = token,
+                                    emisorFallback = emisorPdf,
                                     modifier = Modifier.padding(horizontal = 16.dp),
                                     onClick = { detalle = doc },
+                                    onReenviado = { refreshKey++ },
                                 )
                             }
                         }
-                        item { Spacer(Modifier.height(24.dp)) }
+                        item { Spacer(Modifier.height(16.dp)) }
                     }
                 }
             }
@@ -290,17 +322,23 @@ fun ComprobantesEmitidosScreen(
         compra = detalle,
         onDismiss = { detalle = null },
         modo = DetalleComprobanteModo.VENTA,
+        companyRuc = companyRuc,
+        token = token,
+        emisorFallback = emisorPdf,
+        onReenviado = {
+            refreshKey++
+            detalle = null
+        },
     )
 }
 
 @Composable
 private fun FiltroFechaEmitidosCard(
-    rango: Pair<LocalDate, LocalDate>,
+    rango: Pair<LocalDate, LocalDate>?,
     preset: PresetFecha,
     onPreset: (PresetFecha) -> Unit,
     onElegirFecha: () -> Unit,
 ) {
-    val (ini, fin) = rango
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -332,7 +370,11 @@ private fun FiltroFechaEmitidosCard(
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
-                        if (ini == fin) formatearDiaElegante(ini) else formatearRangoElegante(ini, fin),
+                        when {
+                            preset == PresetFecha.TODOS || rango == null -> "Todos los comprobantes"
+                            rango.first == rango.second -> formatearDiaElegante(rango.first)
+                            else -> formatearRangoElegante(rango.first, rango.second)
+                        },
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = C.primary,
@@ -347,6 +389,7 @@ private fun FiltroFechaEmitidosCard(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                FiltroChip("Todos", preset == PresetFecha.TODOS) { onPreset(PresetFecha.TODOS) }
                 FiltroChip("Hoy", preset == PresetFecha.HOY) { onPreset(PresetFecha.HOY) }
                 FiltroChip("Ayer", preset == PresetFecha.AYER) { onPreset(PresetFecha.AYER) }
                 FiltroChip("7 días", preset == PresetFecha.ULTIMOS_7) { onPreset(PresetFecha.ULTIMOS_7) }
@@ -385,10 +428,17 @@ private fun FiltroChip(
 @Composable
 private fun ComprobanteEmitidoCard(
     doc: Invoice,
+    companyRuc: String,
+    token: String?,
+    emisorFallback: Company? = null,
     onClick: () -> Unit,
+    onReenviado: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var descargandoPdfFormato by remember(doc.id) { mutableStateOf<PdfFormato?>(null) }
+    var reenviando by remember(doc.id) { mutableStateOf(false) }
     val estadoColor = Color(doc.estado.colorArgb())
 
     Card(
@@ -456,12 +506,23 @@ private fun ComprobanteEmitidoCard(
                         color = C.primary,
                         fontSize = 16.sp,
                     )
-                    doc.fechaEmision?.take(10)?.let {
+                    doc.fechaEmisionLegible()?.let {
                         Text(it, fontSize = 11.sp, color = C.textSecondary)
                     }
                 }
             }
             Spacer(Modifier.height(8.dp))
+            if (doc.estado == ComprobanteEstado.RECHAZADO) {
+                doc.motivoRechazoSunat()?.let { motivo ->
+                    Text(
+                        text = motivo,
+                        fontSize = 12.sp,
+                        color = estadoColor,
+                        lineHeight = 16.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -485,23 +546,150 @@ private fun ComprobanteEmitidoCard(
                     color = C.textSecondary,
                 )
             }
-            if (doc.tienePdf()) {
+            if (doc.tienePdf() || doc.puedeReenviar()) {
                 HorizontalDivider(
                     modifier = Modifier.padding(top = 10.dp),
                     color = C.border.copy(alpha = 0.35f),
                 )
-                TextButton(
-                    onClick = { ComprobanteDocumentIntents.abrirPdf(context, doc) },
-                    modifier = Modifier.padding(top = 2.dp),
+                Row(
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(
-                        Icons.Outlined.PictureAsPdf,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = C.accent,
-                    )
-                    Spacer(Modifier.size(6.dp))
-                    Text("Ver PDF", fontSize = 13.sp, color = C.accent)
+                    if (doc.puedeReenviar()) {
+                        TextButton(
+                            enabled = !reenviando,
+                            onClick = {
+                                reenviando = true
+                                scope.launch {
+                                    val result = withContext(Dispatchers.IO) {
+                                        ComprobanteRepository.reenviar(companyRuc, token, doc.id)
+                                    }
+                                    reenviando = false
+                                    result.fold(
+                                        onSuccess = { actualizado ->
+                                            val msg = if (actualizado.sunatOk == true) {
+                                                "${actualizado.etiquetaCompleta} aceptado por SUNAT"
+                                            } else {
+                                                actualizado.motivoRechazoSunat()
+                                                    ?: "${actualizado.etiquetaCompleta} sigue rechazado"
+                                            }
+                                            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+                                            onReenviado()
+                                        },
+                                        onFailure = {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                it.message ?: "No se pudo reenviar",
+                                                android.widget.Toast.LENGTH_LONG,
+                                            ).show()
+                                        },
+                                    )
+                                }
+                            },
+                        ) {
+                            if (reenviando) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = C.primary,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Outlined.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = C.primary,
+                                )
+                            }
+                            Spacer(Modifier.size(6.dp))
+                            Text(
+                                if (reenviando) "Reenviando…" else "Reenviar",
+                                fontSize = 13.sp,
+                                color = C.primary,
+                            )
+                        }
+                    }
+                    if (doc.tienePdf()) {
+                        TextButton(
+                            enabled = descargandoPdfFormato == null,
+                            onClick = {
+                                descargandoPdfFormato = PdfFormato.A4
+                                scope.launch {
+                                    ComprobanteDocumentIntents.abrirPdf(
+                                        context = context,
+                                        comprobante = doc,
+                                        companyRuc = companyRuc,
+                                        token = token,
+                                        formato = PdfFormato.A4,
+                                        emisorFallback = emisorFallback,
+                                    )
+                                    descargandoPdfFormato = null
+                                }
+                            },
+                        ) {
+                            if (descargandoPdfFormato == PdfFormato.A4) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = C.accent,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Outlined.PictureAsPdf,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = C.accent,
+                                )
+                            }
+                            Spacer(Modifier.size(6.dp))
+                            Text(
+                                if (descargandoPdfFormato == PdfFormato.A4) "Descargando…" else "PDF A4",
+                                fontSize = 13.sp,
+                                color = C.accent,
+                            )
+                        }
+                        TextButton(
+                            enabled = descargandoPdfFormato == null,
+                            onClick = {
+                                descargandoPdfFormato = PdfFormato.TICKET
+                                scope.launch {
+                                    ComprobanteDocumentIntents.abrirPdf(
+                                        context = context,
+                                        comprobante = doc,
+                                        companyRuc = companyRuc,
+                                        token = token,
+                                        formato = PdfFormato.TICKET,
+                                        emisorFallback = emisorFallback,
+                                    )
+                                    descargandoPdfFormato = null
+                                }
+                            },
+                        ) {
+                            if (descargandoPdfFormato == PdfFormato.TICKET) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp,
+                                    color = C.accent,
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Outlined.Receipt,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = C.accent,
+                                )
+                            }
+                            Spacer(Modifier.size(6.dp))
+                            Text(
+                                if (descargandoPdfFormato == PdfFormato.TICKET) "Descargando…" else "Ticket",
+                                fontSize = 13.sp,
+                                color = C.accent,
+                            )
+                        }
+                    }
                 }
             }
         }

@@ -105,7 +105,11 @@ fun LoginScreen(
         if (recordar) {
             LoginPreferences.emailRecordado(context)?.let { email = it }
         }
-        sesionPersistida = AuthRepository.puedeUsarBiometria(context)
+        sesionPersistida = try {
+            AuthRepository.puedeUsarBiometria(context)
+        } catch (_: Exception) {
+            false
+        }
     }
 
     val emailValido = email.contains("@") && email.contains(".")
@@ -119,9 +123,8 @@ fun LoginScreen(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        C.headerStart,
-                        C.headerEnd,
-                        C.headerBottom,
+                        C.topBar,
+                        C.primary,
                         C.background,
                         C.background,
                     ),
@@ -262,19 +265,27 @@ fun LoginScreen(
                             if (cargando) return@Button
                             scope.launch {
                                 cargando = true
-                                val result = AuthRepository.login(
-                                    context,
-                                    email,
-                                    pin,
-                                    recordarSesion,
-                                )
-                                result.onSuccess { usuario ->
+                                try {
+                                    val result = AuthRepository.login(
+                                        context,
+                                        email,
+                                        pin,
+                                        recordarSesion,
+                                    )
+                                    result.onSuccess { usuario ->
+                                        onLoginBackendExitoso(usuario)
+                                    }
+                                    result.onFailure { error ->
+                                        onLoginBackendFallo(error.mensajeAuth())
+                                    }
+                                } catch (e: Throwable) {
+                                    onLoginBackendFallo(
+                                        (e as? Exception)?.mensajeAuth()
+                                            ?: e.message?.takeIf { it.isNotBlank() }
+                                            ?: "No se pudo iniciar sesión. Intenta de nuevo.",
+                                    )
+                                } finally {
                                     cargando = false
-                                    onLoginBackendExitoso(usuario)
-                                }
-                                result.onFailure { error ->
-                                    cargando = false
-                                    onLoginBackendFallo(error.mensajeAuth())
                                 }
                             }
                         },

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Print
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Warehouse
@@ -43,6 +45,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,7 +70,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.factapp.jhonny.extras.LoadingOverlay
 import com.factapp.jhonny.modelos.Usuario
+import com.factapp.jhonny.modelos.esAdmin
 import com.factapp.jhonny.network.CatalogRepository
 import com.factapp.jhonny.network.InventarioRepository
 import com.factapp.jhonny.network.mensajeAuth
@@ -81,18 +87,27 @@ import com.factapp.jhonny.network.dto.model.etiquetaTipoHistorial
 import com.factapp.jhonny.network.dto.model.resumenProductos
 import com.factapp.jhonny.network.dto.model.etiquetaGuiaRemision
 import com.factapp.jhonny.network.dto.model.tituloHistorial
-import com.factapp.jhonny.network.dto.demo.InventarioDemo
 import com.factapp.jhonny.network.dto.companyRucParaCatalogo
+import com.factapp.jhonny.network.dto.almacenIdParaOperaciones
 import com.factapp.jhonny.network.dto.disponibleParaSalida
 import com.factapp.jhonny.network.dto.disponibleParaIngreso
 import com.factapp.jhonny.network.dto.formatCantidadConUnidad
+import com.factapp.jhonny.network.dto.model.UbicacionProducto
+import com.factapp.jhonny.network.dto.model.HistorialItemTipo
+import com.factapp.jhonny.network.dto.model.etiquetaCantidad
+import com.factapp.jhonny.network.dto.model.etiquetaRecorrido
+import com.factapp.jhonny.network.dto.model.etiquetaTipo
+import com.factapp.jhonny.network.dto.model.fechaHoraCompacto
+import com.factapp.jhonny.network.dto.model.fechaLegible
+import com.factapp.jhonny.network.dto.model.horaLegible
 import com.factapp.jhonny.network.dto.model.resumenSeries
 import com.factapp.jhonny.ui.catalogo.CatalogoBusquedaBar
+import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
-import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -127,10 +142,19 @@ fun SalidasScreen(
 
     suspend fun recargar() {
         if (companyRuc.isBlank()) return
-        CatalogRepository.listarParaGestion(companyRuc, token).onSuccess { catalogoLista = it }
-        InventarioRepository.listarSalidas(companyRuc, token).onSuccess { salidas = it }
-        InventarioRepository.listarAlmacenes(companyRuc, token).onSuccess { lista ->
-            almacenesMap = lista.associateBy { it.id }
+        val cat = withContext(Dispatchers.IO) {
+            CatalogRepository.listarParaGestion(companyRuc, token)
+        }
+        val sal = withContext(Dispatchers.IO) {
+            InventarioRepository.listarSalidas(companyRuc, token)
+        }
+        val alm = withContext(Dispatchers.IO) {
+            InventarioRepository.listarAlmacenes(companyRuc, token, todos = true)
+        }
+        withContext(Dispatchers.Main) {
+            cat.onSuccess { catalogoLista = it }
+            sal.onSuccess { salidas = it }
+            alm.onSuccess { lista -> almacenesMap = lista.associateBy { it.id } }
         }
     }
 
@@ -142,34 +166,34 @@ fun SalidasScreen(
         }
         cargando = true
         error = null
-        withContext(Dispatchers.IO) { recargar() }
+        recargar()
         cargando = false
     }
 
-    val filtradas = remember(salidas, busqueda) {
+    val filtradas = remember(salidas, busqueda, almacenesMap) {
         if (busqueda.isBlank()) salidas
         else {
             val q = busqueda.trim().lowercase()
             salidas.filter { mov ->
                 mov.numeroDisplay.lowercase().contains(q) ||
                     mov.estado?.name?.lowercase()?.contains(q) == true ||
-                    mov.cliente?.razonSocial?.lowercase()?.contains(q) == true
+                    mov.cliente?.razonSocial?.lowercase()?.contains(q) == true ||
+                    mov.cliente?.numeroDoc?.lowercase()?.contains(q) == true ||
+                    almacenesMap[mov.almacenId]?.nombre?.lowercase()?.contains(q) == true ||
+                    almacenesMap[mov.almacenId]?.codigo?.lowercase()?.contains(q) == true ||
+                    almacenesMap[mov.almacenDestinoId]?.nombre?.lowercase()?.contains(q) == true ||
+                    almacenesMap[mov.almacenDestinoId]?.codigo?.lowercase()?.contains(q) == true ||
+                    mov.etiquetaDestino(almacenesMap)?.lowercase()?.contains(q) == true
             }
         }
     }
 
-    Scaffold(
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Salidas",
-                subtitulo = "${salidas.size} salidas registradas",
-                icono = Icons.Default.LocalShipping,
-                onVolver = onVolver,
-            )
-        },
+        titulo = "Salidas",
+        subtitulo = "${salidas.size} salidas registradas",
+        icono = Icons.Default.LocalShipping,
+        onVolver = onVolver,
         floatingActionButton = {
             if (!cargando && error == null) {
                 FloatingActionButton(
@@ -210,7 +234,13 @@ fun SalidasScreen(
                         }
                         item {
                             Column(Modifier.padding(horizontal = 16.dp)) {
-                                BusquedaSeccion(busqueda, { busqueda = it }, salidas.size, filtradas.size)
+                                BusquedaSeccion(
+                                    busqueda = busqueda,
+                                    onBusquedaChange = { busqueda = it },
+                                    total = salidas.size,
+                                    resultados = filtradas.size,
+                                    placeholder = "Número, cliente, almacén…",
+                                )
                             }
                         }
                         if (salidas.isEmpty()) {
@@ -445,16 +475,14 @@ private fun SalidaDetalleSheet(
         MovimientoEstado.ANULADA -> Color(0xFFC62828)
         null -> Color(0xFF516B82)
     }
-    val fecha = salida.fechaDespacho ?: salida.fecha
     val origen = almacenes[salida.almacenId]?.nombre ?: salida.almacenId
     val destino = salida.etiquetaDestino(almacenes) ?: "Sin destino"
-
     val detalle = MovimientoDetalleUi(
         etiqueta = salida.estado?.name ?: "Salida",
         titulo = salida.numeroDisplay,
         subtitulo = destino,
-        fecha = fecha.take(10),
-        hora = fecha.takeIf { it.length >= 16 && it[10] == 'T' }?.substring(11, 16),
+        fecha = salida.fechaLegible(),
+        hora = salida.horaLegible(),
         origen = origen,
         destino = destino,
         lineas = salida.lineas.map { linea ->
@@ -633,23 +661,37 @@ fun IngresosScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var busqueda by remember { mutableStateOf("") }
     var mostrarRegistrar by remember { mutableStateOf(false) }
+    var esDevolucionInicial by remember { mutableStateOf(false) }
+    var registrando by remember { mutableStateOf(false) }
+    var ingresoAcciones by remember { mutableStateOf<Movimiento?>(null) }
+    var ingresoDetalle by remember { mutableStateOf<Movimiento?>(null) }
 
-    val catalogoMap = remember(catalogoLista) { catalogoLista.associateBy { it.id } }
-    val almacenesMap = remember(almacenes) { almacenes.associateBy { it.id } }
+    val catalogoMap = remember(catalogoLista) {
+        catalogoLista.distinctBy { it.id }.associateBy { it.id }
+    }
+    val almacenesMap = remember(almacenes) {
+        almacenes.distinctBy { it.id }.associateBy { it.id }
+    }
     val productosDisponibles = remember(catalogoLista) {
         catalogoLista.filter { it.disponibleParaIngreso() }
     }
 
     suspend fun recargar() {
         if (companyRuc.isBlank()) return
-        CatalogRepository.listarParaGestion(companyRuc, token)
-            .onSuccess { catalogoLista = it }
-            .onFailure { error = it.mensajeAuth() }
-        InventarioRepository.listarIngresos(companyRuc, token)
-            .onSuccess { ingresos = it }
-            .onFailure { error = it.mensajeAuth() }
-        InventarioRepository.listarAlmacenes(companyRuc, token)
-            .onSuccess { lista -> almacenes = lista }
+        val cat = withContext(Dispatchers.IO) {
+            CatalogRepository.listarParaGestion(companyRuc, token)
+        }
+        val ing = withContext(Dispatchers.IO) {
+            InventarioRepository.listarIngresos(companyRuc, token)
+        }
+        val alm = withContext(Dispatchers.IO) {
+            InventarioRepository.listarAlmacenes(companyRuc, token, todos = usuario?.esAdmin() == true)
+        }
+        withContext(Dispatchers.Main) {
+            cat.onSuccess { catalogoLista = it }.onFailure { error = it.mensajeAuth() }
+            ing.onSuccess { ingresos = it }.onFailure { error = it.mensajeAuth() }
+            alm.onSuccess { lista -> almacenes = lista }
+        }
     }
 
     LaunchedEffect(companyRuc, token) {
@@ -660,8 +702,13 @@ fun IngresosScreen(
         }
         cargando = true
         error = null
-        withContext(Dispatchers.IO) { recargar() }
-        cargando = false
+        try {
+            recargar()
+        } catch (e: Exception) {
+            error = e.mensajeAuth()
+        } finally {
+            cargando = false
+        }
     }
 
     val filtrados = remember(ingresos, busqueda, catalogoMap) {
@@ -670,7 +717,9 @@ fun IngresosScreen(
             val q = busqueda.trim().lowercase()
             ingresos.filter { mov ->
                 mov.observaciones?.lowercase()?.contains(q) == true ||
-                    mov.lineas.any { linea ->
+                    mov.cliente?.razonSocial?.lowercase()?.contains(q) == true ||
+                    mov.cliente?.numeroDoc?.lowercase()?.contains(q) == true ||
+                    mov.lineasSeguras.any { linea ->
                         catalogoMap[linea.catalogItemId]?.nombre?.lowercase()?.contains(q) == true ||
                             linea.nombreEfectivo.lowercase().contains(q) ||
                             linea.catalogItemId.lowercase().contains(q) ||
@@ -681,22 +730,19 @@ fun IngresosScreen(
         }
     }
 
-    Scaffold(
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Ingresos",
-                subtitulo = "Mercadería que entra a tu almacén",
-                icono = Icons.Default.Input,
-                onVolver = onVolver,
-            )
-        },
+        titulo = "Ingresos",
+        subtitulo = "Mercadería que entra a tu almacén",
+        icono = Icons.Default.Input,
+        onVolver = onVolver,
         floatingActionButton = {
             if (!cargando && error == null) {
                 FloatingActionButton(
-                    onClick = { mostrarRegistrar = true },
+                    onClick = {
+                        esDevolucionInicial = false
+                        mostrarRegistrar = true
+                    },
                     containerColor = C.accent,
                     contentColor = C.onPrimary,
                 ) {
@@ -728,7 +774,14 @@ fun IngresosScreen(
                         item {
                             IngresosAccionesRapidas(
                                 productosDisponibles = productosDisponibles.size,
-                                onNuevoIngreso = { mostrarRegistrar = true },
+                                onNuevoIngreso = {
+                                    esDevolucionInicial = false
+                                    mostrarRegistrar = true
+                                },
+                                onDevolucionCliente = {
+                                    esDevolucionInicial = true
+                                    mostrarRegistrar = true
+                                },
                                 onIrACatalogo = onIrACatalogo,
                             )
                         }
@@ -755,12 +808,16 @@ fun IngresosScreen(
                         } else if (filtrados.isEmpty()) {
                             item { MensajeSinResultados() }
                         } else {
-                            items(filtrados, key = { it.id }) { mov ->
+                            items(
+                                filtrados,
+                                key = { mov -> mov.id.ifBlank { "ingreso-${mov.hashCode()}" } },
+                            ) { mov ->
                                 IngresoCard(
                                     mov = mov,
                                     catalogo = catalogoMap,
                                     almacenes = almacenesMap,
                                     modifier = Modifier.padding(horizontal = 7.dp),
+                                    onClick = { ingresoAcciones = mov },
                                 )
                             }
                         }
@@ -773,42 +830,170 @@ fun IngresosScreen(
 
     RegistrarIngresoSheet(
         visible = mostrarRegistrar,
-        productosDisponibles = productosDisponibles,
+        catalogoCompleto = catalogoLista,
         companyRuc = companyRuc,
+        token = token,
         almacenes = almacenes,
+        almacenIdDefault = usuario.almacenIdParaOperaciones(),
+        almacenUsuarioId = usuario.almacenIdParaOperaciones(),
+        esAdmin = usuario?.esAdmin() == true,
+        esDevolucionInicial = esDevolucionInicial,
         onDismiss = { mostrarRegistrar = false },
         onRegistrar = { body ->
             scope.launch {
-                val resultado = withContext(Dispatchers.IO) {
-                    InventarioRepository.registrarEntrada(companyRuc, token, body)
+                registrando = true
+                try {
+                    val resultado = withContext(Dispatchers.IO) {
+                        InventarioRepository.registrarEntrada(companyRuc, token, body)
+                    }
+                    resultado
+                        .onSuccess { mov ->
+                            recargar()
+                            mostrarRegistrar = false
+                            Toast.makeText(
+                                context,
+                                "Ingreso ${mov.numero ?: mov.id.take(8)} registrado",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                        .onFailure {
+                            Toast.makeText(
+                                context,
+                                it.mensajeAuth(),
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                } catch (e: Exception) {
+                    Toast.makeText(
+                        context,
+                        e.mensajeAuth(),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                } finally {
+                    registrando = false
                 }
-                resultado
-                    .onSuccess {
-                        withContext(Dispatchers.IO) { recargar() }
-                        Toast.makeText(context, "Ingreso registrado", Toast.LENGTH_SHORT).show()
-                    }
-                    .onFailure {
-                        Toast.makeText(
-                            context,
-                            it.mensajeAuth(),
-                            Toast.LENGTH_LONG,
-                        ).show()
-                    }
             }
         },
     )
+
+    LoadingOverlay(visible = registrando, message = "Registrando ingreso...")
+
+    IngresoAccionesSheet(
+        ingreso = ingresoAcciones,
+        onDismiss = { ingresoAcciones = null },
+        onMasOpciones = { ingreso ->
+            ingresoAcciones = null
+            ingresoDetalle = ingreso
+        },
+    )
+    HistorialMovimientoDetalleSheet(
+        movimiento = ingresoDetalle,
+        catalogo = catalogoMap,
+        almacenes = almacenesMap,
+        onDismiss = { ingresoDetalle = null },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun IngresoAccionesSheet(
+    ingreso: Movimiento?,
+    onDismiss: () -> Unit,
+    onMasOpciones: (Movimiento) -> Unit,
+) {
+    if (ingreso == null) return
+
+    val esDevolucion = ingreso.referenciaTipo == "DEVOLUCION_CLIENTE"
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = C.background,
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 12.dp, bottom = 4.dp)
+                    .size(width = 40.dp, height = 4.dp)
+                    .background(C.border, RoundedCornerShape(50)),
+            )
+        },
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = CircleShape,
+                    color = Color(0xFF2E7D32).copy(alpha = 0.12f),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Input,
+                            contentDescription = null,
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        if (esDevolucion) "Opciones de devolución" else "Opciones de ingreso",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = C.primary,
+                    )
+                    Text(
+                        ingreso.numeroDisplay,
+                        fontSize = 13.sp,
+                        color = C.textSecondary,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Cerrar", tint = C.textSecondary)
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+
+            SalidaAccionMenuItem(
+                icono = Icons.Default.MoreHoriz,
+                titulo = "Más opciones",
+                detalle = if (esDevolucion) {
+                    "Ver todos los detalles de la devolución"
+                } else {
+                    "Ver todos los detalles del ingreso"
+                },
+                color = Color(0xFF6A1B9A),
+                onClick = { onMasOpciones(ingreso) },
+            )
+        }
+    }
 }
 
 @Composable
 private fun IngresosAccionesRapidas(
     productosDisponibles: Int,
     onNuevoIngreso: () -> Unit,
+    onDevolucionCliente: () -> Unit,
     onIrACatalogo: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -823,12 +1008,18 @@ private fun IngresosAccionesRapidas(
             )
             InventarioAccionCard(
                 modifier = Modifier.weight(1f),
-                icono = Icons.Default.Inventory2,
-                titulo = "Catálogo",
-                detalle = "Gestionar productos",
-                onClick = onIrACatalogo,
+                icono = Icons.Default.Replay,
+                titulo = "Devolución",
+                detalle = "Cliente devuelve al almacén",
+                onClick = onDevolucionCliente,
             )
         }
+        InventarioAccionCard(
+            icono = Icons.Default.Inventory2,
+            titulo = "Catálogo",
+            detalle = "Gestionar productos",
+            onClick = onIrACatalogo,
+        )
     }
 }
 
@@ -860,6 +1051,11 @@ private fun InventarioAccionCard(
     }
 }
 
+private enum class ModoBusquedaUbicacion(val apiValue: String) {
+    SERIE("serie"),
+    NOMBRE("nombre"),
+}
+
 @Composable
 fun HistorialInventarioScreen(
     modifier: Modifier = Modifier,
@@ -870,91 +1066,285 @@ fun HistorialInventarioScreen(
     val companyRuc = usuario.companyRucParaCatalogo().orEmpty()
     val token = usuario?.token
 
-    var movimientos by remember { mutableStateOf<List<Movimiento>>(emptyList()) }
-    var almacenes by remember { mutableStateOf<List<Almacen>>(emptyList()) }
-    var cargando by remember { mutableStateOf(true) }
+    var ubicaciones by remember { mutableStateOf<List<UbicacionProducto>>(emptyList()) }
+    var cargando by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var busqueda by remember { mutableStateOf("") }
-    var movimientoDetalle by remember { mutableStateOf<Movimiento?>(null) }
-    var catalogoMap by remember { mutableStateOf<Map<String, CatalogItem>>(emptyMap()) }
+    var modoBusqueda by remember { mutableStateOf(ModoBusquedaUbicacion.SERIE) }
 
-    val almacenesMap = remember(almacenes) { almacenes.associateBy { it.id } }
-
-    LaunchedEffect(companyRuc, token) {
+    LaunchedEffect(companyRuc, token, busqueda, modoBusqueda) {
+        error = null
+        val q = busqueda.trim()
+        val modo = modoBusqueda
         if (companyRuc.isBlank()) {
-            cargando = false
             error = "Sin empresa vinculada"
+            ubicaciones = emptyList()
+            return@LaunchedEffect
+        }
+        if (q.length < 2) {
+            cargando = false
+            ubicaciones = emptyList()
             return@LaunchedEffect
         }
         cargando = true
+        delay(350)
+        if (busqueda.trim() != q || modoBusqueda != modo) return@LaunchedEffect
         withContext(Dispatchers.IO) {
-            val catalogo = CatalogRepository.listarParaGestion(companyRuc, token)
-                .getOrNull()
-                ?.associateBy { it.id }
-                .orEmpty()
-            catalogoMap = catalogo
-            InventarioRepository.listarHistorial(companyRuc, token)
-                .onSuccess { lista -> movimientos = lista }
-                .onFailure { error = it.message }
-            InventarioRepository.listarAlmacenes(companyRuc, token).onSuccess { lista ->
-                almacenes = lista
-            }
+            InventarioRepository.buscarUbicaciones(
+                companyRuc = companyRuc,
+                token = token,
+                query = q,
+                modo = modo.apiValue,
+            )
+                .onSuccess { lista -> ubicaciones = lista }
+                .onFailure {
+                    ubicaciones = emptyList()
+                    error = it.mensajeAuth()
+                }
         }
         cargando = false
     }
 
-    val filtrados = remember(movimientos, busqueda, catalogoMap) {
-        movimientos.filtrarHistorial(busqueda, catalogoMap)
-    }
-
-    InventarioListaScaffold(
-        modifier = modifier,
+    AppEmitScaffold(
+        modifier = modifier.fillMaxSize(),
         titulo = "Historial",
-        subtitulo = "Vida del producto · ingresos y salidas",
+        subtitulo = "Trazabilidad por ítem · entrada o salida",
         icono = Icons.Default.History,
         onVolver = onVolver,
-        cargando = cargando,
-        error = error,
-        vacio = movimientos.isEmpty(),
-        mensajeVacio = "Sin movimientos en el historial",
-    ) {
-        item {
-            BusquedaSeccion(busqueda, { busqueda = it }, movimientos.size, filtrados.size)
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                HistorialModoBusquedaCard(
+                    modo = modoBusqueda,
+                    onModo = { modoBusqueda = it },
+                )
+                Spacer(Modifier.height(10.dp))
+                CatalogoBusquedaBar(
+                    value = busqueda,
+                    onValueChange = { busqueda = it },
+                    totalItems = ubicaciones.size,
+                    resultados = ubicaciones.size,
+                    placeholder = when (modoBusqueda) {
+                        ModoBusquedaUbicacion.SERIE -> "Buscar por número de serie…"
+                        ModoBusquedaUbicacion.NOMBRE -> "Buscar por nombre de producto…"
+                    },
+                )
+            }
+
+            when {
+                error != null -> Box(
+                    Modifier.fillMaxSize().padding(24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(error!!, color = C.textSecondary)
+                }
+                cargando -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = C.accent)
+                }
+                busqueda.trim().length < 2 -> Box(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "Escribe al menos 2 caracteres para ver el historial del ítem",
+                        color = C.textSecondary,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                    )
+                }
+                ubicaciones.isEmpty() -> Box(
+                    Modifier.fillMaxSize().padding(32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "Sin movimientos para tu búsqueda",
+                        color = C.textSecondary,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                else -> LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item { Spacer(Modifier.height(4.dp)) }
+                    items(ubicaciones, key = { it.id }) { item ->
+                        HistorialItemCard(item = item)
+                    }
+                    item { Spacer(Modifier.height(24.dp)) }
+                }
+            }
         }
-        if (filtrados.isEmpty() && movimientos.isNotEmpty()) {
-            item { MensajeSinResultados() }
-        } else {
-            items(filtrados, key = { it.id }) { mov ->
-                HistorialMovimientoCard(
-                    movimiento = mov,
-                    catalogo = catalogoMap,
-                    modifier = Modifier.padding(horizontal = 0.dp),
-                    onClick = { movimientoDetalle = mov },
+    }
+}
+
+@Composable
+private fun HistorialModoBusquedaCard(
+    modo: ModoBusquedaUbicacion,
+    onModo: (ModoBusquedaUbicacion) -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = C.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Text(
+                "Buscar por",
+                fontSize = 12.sp,
+                color = C.textSecondary,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                HistorialModoChip(
+                    label = "Número de serie",
+                    selected = modo == ModoBusquedaUbicacion.SERIE,
+                    onClick = { onModo(ModoBusquedaUbicacion.SERIE) },
+                )
+                HistorialModoChip(
+                    label = "Nombre",
+                    selected = modo == ModoBusquedaUbicacion.NOMBRE,
+                    onClick = { onModo(ModoBusquedaUbicacion.NOMBRE) },
                 )
             }
         }
     }
+}
 
-    HistorialMovimientoDetalleSheet(
-        movimiento = movimientoDetalle,
-        catalogo = catalogoMap,
-        almacenes = almacenesMap,
-        onDismiss = { movimientoDetalle = null },
+@Composable
+private fun HistorialModoChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label, fontSize = 13.sp) },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = C.accent,
+            selectedLabelColor = Color.White,
+            containerColor = C.surfaceSoft,
+            labelColor = C.textPrimary,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = C.border.copy(alpha = 0.5f),
+            selectedBorderColor = C.accent,
+        ),
     )
 }
 
-private fun List<Movimiento>.filtrarHistorial(
-    query: String,
-    catalogo: Map<String, CatalogItem>,
-): List<Movimiento> {
-    if (query.isBlank()) return this
-    val q = query.trim().lowercase()
-    return filter { mov ->
-        mov.numeroDisplay.lowercase().contains(q) ||
-            mov.tituloHistorial().lowercase().contains(q) ||
-            mov.detalleHistorial(catalogo).lowercase().contains(q) ||
-            mov.etiquetaTipoHistorial().lowercase().contains(q) ||
-            mov.observaciones?.lowercase()?.contains(q) == true
+@Composable
+private fun HistorialItemCard(
+    item: UbicacionProducto,
+    modifier: Modifier = Modifier,
+) {
+    val (icono, color) = when {
+        item.tipoMovimiento == HistorialItemTipo.ENTRADA ->
+            Icons.Default.Input to Color(0xFF2E7D32)
+        item.esTraslado ->
+            Icons.Default.Warehouse to Color(0xFF6A1B9A)
+        else ->
+            Icons.Default.LocalShipping to Color(0xFF1565C0)
+    }
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = C.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Surface(Modifier.size(40.dp), shape = CircleShape, color = color.copy(alpha = 0.12f)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icono, null, tint = color, modifier = Modifier.size(22.dp))
+                }
+            }
+            Spacer(Modifier.size(12.dp))
+            Column(Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        item.catalogItemNombre,
+                        fontWeight = FontWeight.Bold,
+                        color = C.textPrimary,
+                        fontSize = 15.sp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = color.copy(alpha = 0.12f),
+                    ) {
+                        Text(
+                            item.etiquetaTipo(),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            fontSize = 11.sp,
+                            color = color,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+                if (!item.numeroSerie.isNullOrBlank()) {
+                    Text(
+                        "Serie ${item.numeroSerie}",
+                        fontSize = 13.sp,
+                        color = C.textSecondary,
+                    )
+                } else {
+                    Text(
+                        item.etiquetaCantidad(),
+                        fontSize = 13.sp,
+                        color = C.textSecondary,
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    item.etiquetaRecorrido(),
+                    fontSize = 14.sp,
+                    color = C.textPrimary,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 20.sp,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    buildString {
+                        append(item.fechaHoraCompacto())
+                        item.movimientoNumero?.takeIf { it.isNotBlank() }?.let { num ->
+                            append(" · ")
+                            append(num)
+                        }
+                    },
+                    fontSize = 11.sp,
+                    color = C.accent,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
     }
 }
 
@@ -971,18 +1361,12 @@ private fun InventarioListaScaffold(
     modifier: Modifier = Modifier,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
 ) {
-    Scaffold(
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = titulo,
-                subtitulo = subtitulo,
-                icono = icono,
-                onVolver = onVolver,
-            )
-        },
+        titulo = titulo,
+        subtitulo = subtitulo,
+        icono = icono,
+        onVolver = onVolver,
     ) { padding ->
         Column(
             modifier = Modifier
@@ -1026,6 +1410,7 @@ private fun BusquedaSeccion(
     onBusquedaChange: (String) -> Unit,
     total: Int,
     resultados: Int,
+    placeholder: String = "Buscar por nombre o tipo…",
 ) {
     Column(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
         CatalogoBusquedaBar(
@@ -1033,6 +1418,7 @@ private fun BusquedaSeccion(
             onValueChange = onBusquedaChange,
             totalItems = total,
             resultados = resultados,
+            placeholder = placeholder,
         )
     }
 }
@@ -1062,7 +1448,7 @@ private fun SalidaCard(
     }
     val destino = salida.etiquetaDestino(almacenes) ?: "Destino no especificado"
     val origen = almacenes[salida.almacenId]?.nombre ?: salida.almacenId
-    val fecha = (salida.fechaDespacho ?: salida.fecha).take(10)
+    val fecha = salida.fechaLegible()
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -1201,12 +1587,17 @@ private fun IngresoCard(
     catalogo: Map<String, CatalogItem>,
     almacenes: Map<String, Almacen> = emptyMap(),
     modifier: Modifier = Modifier,
+    onClick: () -> Unit = {},
 ) {
     val almacen = almacenes[mov.almacenId]?.nombre ?: mov.almacenId
-    val fecha = mov.fecha.take(10)
-    val lineasPreview = mov.lineas.take(2)
+    val esDevolucion = mov.referenciaTipo == "DEVOLUCION_CLIENTE"
+    val fecha = mov.fechaLegible()
+    val lineasMov = mov.lineasSeguras
+    val lineasPreview = lineasMov.take(2)
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = C.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
@@ -1238,7 +1629,7 @@ private fun IngresoCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "Ingreso",
+                            if (esDevolucion) "Devolución cliente" else "Ingreso",
                             fontWeight = FontWeight.Bold,
                             color = C.textPrimary,
                             fontSize = 16.sp,
@@ -1249,7 +1640,7 @@ private fun IngresoCard(
                             color = Color(0xFF2E7D32).copy(alpha = 0.12f),
                         ) {
                             Text(
-                                "ENTRADA",
+                                if (esDevolucion) "DEVOLUCIÓN" else "ENTRADA",
                                 modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
@@ -1260,7 +1651,17 @@ private fun IngresoCard(
                     }
                     Spacer(Modifier.height(5.dp))
                     Text(
-                        text = "Destino: $almacen",
+                        text = buildString {
+                            if (esDevolucion) {
+                                val clienteNombre = mov.cliente?.razonSocial?.takeIf { it.isNotBlank() }
+                                    ?: mov.cliente?.numeroDoc?.let { "Doc. $it" }
+                                    ?: "Cliente"
+                                append("Origen: $clienteNombre")
+                                append(" · Destino: $almacen")
+                            } else {
+                                append("Destino: $almacen")
+                            }
+                        },
                         fontSize = 14.sp,
                         color = C.textPrimary,
                         fontWeight = FontWeight.SemiBold,
@@ -1312,10 +1713,10 @@ private fun IngresoCard(
                             lineHeight = 17.sp,
                         )
                     }
-                    if (mov.lineas.size > lineasPreview.size) {
+                    if (lineasMov.size > lineasPreview.size) {
                         Spacer(Modifier.height(3.dp))
                         Text(
-                            "+${mov.lineas.size - lineasPreview.size} producto(s) más",
+                            "+${lineasMov.size - lineasPreview.size} producto(s) más",
                             fontSize = 12.sp,
                             color = C.accent,
                             fontWeight = FontWeight.SemiBold,
@@ -1335,7 +1736,7 @@ private fun IngresoCard(
                     color = C.accentSoft,
                 ) {
                     Text(
-                        "${mov.lineas.size} línea(s)",
+                        "${lineasMov.size} línea(s)",
                         modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp),
                         fontSize = 11.sp,
                         color = C.accent,
@@ -1349,6 +1750,12 @@ private fun IngresoCard(
                     color = C.textSecondary,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "Ver opciones",
+                    fontSize = 12.sp,
+                    color = C.accent,
+                    fontWeight = FontWeight.Bold,
                 )
             }
         }
@@ -1408,7 +1815,7 @@ private fun HistorialMovimientoCard(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "${movimiento.etiquetaTipoHistorial()} · ${movimiento.fechaEfectiva.take(16).replace('T', ' ')}",
+                    "${movimiento.etiquetaTipoHistorial()} · ${movimiento.fechaHoraCompacto()}",
                     fontSize = 11.sp,
                     color = C.accent,
                     fontWeight = FontWeight.Medium,

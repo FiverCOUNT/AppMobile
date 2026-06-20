@@ -32,8 +32,11 @@ object LoginPreferences {
 
     suspend fun puedeUsarBiometria(context: Context): Boolean {
         if (!recordarSesion(context)) return false
-        val sesion = SesionStore.obtenerSesionReciente(context)
-        return !sesion?.refreshToken.isNullOrBlank()
+        return try {
+            !SesionStore.obtenerSesionReciente(context)?.refreshToken.isNullOrBlank()
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun prefs(context: Context) =

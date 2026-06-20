@@ -76,9 +76,17 @@ fun HistorialMovimientoDetalleSheet(
                 add(MovimientoDetalleCampoUi("Estado", it.name, Icons.Default.Tag))
             }
             movimiento.cliente?.let { cliente ->
+                val etiquetaCliente = if (
+                    movimiento.tipo == MovimientoTipo.ENTRADA &&
+                    movimiento.referenciaTipo == "DEVOLUCION_CLIENTE"
+                ) {
+                    "Cliente que devuelve"
+                } else {
+                    "Cliente / receptor"
+                }
                 add(
                     MovimientoDetalleCampoUi(
-                        "Cliente / receptor",
+                        etiquetaCliente,
                         cliente.razonSocial ?: "Doc. ${cliente.numeroDoc}",
                         Icons.Default.Person,
                     ),

@@ -2,22 +2,27 @@ package com.factapp.jhonny.ui.inventario
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -40,7 +45,8 @@ private fun List<Cliente>.filtrarClientes(query: String): List<Cliente> {
     return filter { c ->
         c.razonSocial.lowercase().contains(q) ||
             c.numeroDoc.lowercase().contains(q) ||
-            c.address.lineaPrincipal?.lowercase()?.contains(q) == true
+            c.address.lineaPrincipal?.lowercase()?.contains(q) == true ||
+            c.telefono?.lowercase()?.contains(q) == true
     }
 }
 
@@ -53,6 +59,8 @@ fun SalidaClienteBuscarSheet(
     onBusquedaChange: (String) -> Unit,
     onDismiss: () -> Unit,
     onClienteSeleccionado: (Cliente) -> Unit,
+    onNuevoCliente: (() -> Unit)? = null,
+    soloPersonasNaturales: Boolean = false,
 ) {
     if (!visible) return
 
@@ -68,8 +76,12 @@ fun SalidaClienteBuscarSheet(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             EmitFormSheetHeader(
-                titulo = "Buscar cliente",
-                subtitulo = "Clientes registrados de tu empresa",
+                titulo = "Cliente destino",
+                subtitulo = when {
+                    busqueda.isNotBlank() -> "${filtrados.size} de ${clientes.size} clientes"
+                    clientes.isEmpty() -> "Sin clientes registrados"
+                    else -> "${clientes.size} clientes · filtra o registra uno"
+                },
                 icono = Icons.Default.Business,
                 mostrarDragHandle = true,
             )
@@ -84,20 +96,47 @@ fun SalidaClienteBuscarSheet(
                 CatalogoBusquedaBar(
                     value = busqueda,
                     onValueChange = onBusquedaChange,
+                    placeholder = if (soloPersonasNaturales) {
+                        "Nombre, DNI, teléfono…"
+                    } else {
+                        "Nombre, DNI, RUC, teléfono…"
+                    },
                 )
+
+                if (onNuevoCliente != null) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onNuevoCliente,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = null, tint = C.accent)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Nuevo cliente", fontSize = 14.sp, color = C.accent, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+
                 Spacer(Modifier.height(12.dp))
+                Text(
+                    "Lista de clientes",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.sp,
+                    color = C.primary,
+                )
+                Spacer(Modifier.height(8.dp))
+
                 if (filtrados.isEmpty()) {
                     Text(
                         if (busqueda.isNotBlank()) "Sin resultados para tu búsqueda"
-                        else "No hay clientes registrados",
+                        else "No hay clientes registrados. Usa «Nuevo cliente».",
                         color = C.textSecondary,
                         fontSize = 14.sp,
-                        modifier = Modifier.padding(vertical = 24.dp),
+                        modifier = Modifier.padding(vertical = 16.dp),
                     )
                 } else {
                     LazyColumn(
-                        modifier = Modifier.height(320.dp),
-                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.height(280.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(filtrados, key = { it.id }) { cliente ->
                             Card(
@@ -105,7 +144,6 @@ fun SalidaClienteBuscarSheet(
                                     .fillMaxWidth()
                                     .clickable {
                                         onClienteSeleccionado(cliente)
-                                        onDismiss()
                                     },
                                 shape = RoundedCornerShape(12.dp),
                                 colors = CardDefaults.cardColors(containerColor = C.surface),

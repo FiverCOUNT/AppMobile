@@ -9,13 +9,20 @@ import java.sql.Timestamp
  */
 class AppRoomConverters {
     @TypeConverter
-    fun estadoDesdeTexto(valor: String): EstadoUsuario = EstadoUsuario.valueOf(valor)
+    fun estadoDesdeTexto(valor: String): EstadoUsuario = when (valor.uppercase()) {
+        "ACTIVO" -> EstadoUsuario.ACTIVO
+        "DELETED" -> EstadoUsuario.DELETED
+        else -> EstadoUsuario.DISABLED
+    }
 
     @TypeConverter
     fun estadoATexto(estado: EstadoUsuario): String = estado.name
 
     @TypeConverter
-    fun rolDesdeTexto(valor: String): RolUsuario = RolUsuario.valueOf(valor)
+    fun rolDesdeTexto(valor: String): RolUsuario = when (valor.uppercase()) {
+        "ADMIN" -> RolUsuario.ADMIN
+        else -> RolUsuario.USUARIO
+    }
 
     @TypeConverter
     fun rolATexto(rol: RolUsuario): String = rol.name
@@ -28,7 +35,8 @@ class AppRoomConverters {
 
     @TypeConverter
     fun businessTemplateDesdeTexto(valor: String): BusinessTemplate =
-        BusinessTemplate.valueOf(valor)
+        runCatching { BusinessTemplate.valueOf(valor.uppercase()) }
+            .getOrDefault(BusinessTemplate.GENERAL)
 
     @TypeConverter
     fun businessTemplateATexto(plantilla: BusinessTemplate): String = plantilla.name

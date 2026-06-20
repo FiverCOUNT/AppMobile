@@ -51,7 +51,15 @@ class AddressTypeAdapter : JsonDeserializer<Address>, JsonSerializer<Address> {
     ): JsonElement {
         if (src == null) return JsonNull.INSTANCE
         if (src.esSoloLinea()) return JsonPrimitive(src.direccion)
-        return context.serialize(src)
+        val obj = JsonObject()
+        src.ubigeo?.let { obj.addProperty("ubigeo", it) }
+        src.departamento?.let { obj.addProperty("departamento", it) }
+        src.provincia?.let { obj.addProperty("provincia", it) }
+        src.distrito?.let { obj.addProperty("distrito", it) }
+        src.urbanizacion?.let { obj.addProperty("urbanizacion", it) }
+        src.direccion?.let { obj.addProperty("direccion", it) }
+        src.codLocal?.let { obj.addProperty("cod_local", it) }
+        return obj
     }
 }
 

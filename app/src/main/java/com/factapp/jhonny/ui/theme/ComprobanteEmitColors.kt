@@ -1,6 +1,5 @@
 package com.factapp.jhonny.ui.theme
 
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 /** Paleta exclusiva para menús y pantallas de emisión de comprobantes. */
@@ -18,19 +17,8 @@ object ComprobanteEmitColors {
     val textSecondary = Color(0xFF516B82)
     val border = Color(0xFFACC4DB)
     val borderFocused = Color(0xFF3D7EC4)
-    /** Color único para barra de estado del sistema y top bar. */
+    /** Azul oscuro original: top bar + barra de estado (mismo color). */
     val topBar = Color(0xFF0B2341)
     val headerStart = topBar
-    val headerEnd = Color(0xFF1C4678)
-    val headerBottom = Color(0xFF2F6BA7)
     val badge = Color(0xFF2F6494)
-
-    val headerBrush: Brush
-        get() = Brush.verticalGradient(
-            colors = listOf(
-                headerStart,
-                headerEnd,
-                headerBottom,
-            ),
-        )
 }

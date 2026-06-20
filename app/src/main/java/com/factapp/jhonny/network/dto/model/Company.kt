@@ -96,6 +96,8 @@ data class Company(
     val tieneWebhook: Boolean? = null,
     @SerializedName("creado_en")
     val creadoEn: String? = null,
+    @SerializedName(value = "series_config", alternate = ["seriesConfig"])
+    val seriesConfig: Map<String, SeriesDocConfig>? = null,
 ) {
     val telefonoPrincipal: String?
         get() = telefono ?: telefonos?.firstOrNull()
@@ -155,16 +157,23 @@ fun Cliente.aCompany(): Company = Company(
 /** Receptor UBL para [com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest]. */
 fun receptorParaEmitir(
     esBoleta: Boolean,
+    esFactura: Boolean = false,
     cliente: Cliente?,
     docManual: String,
     nombreManual: String,
 ): Company? {
-    cliente?.let { return it.aCompany() }
+    cliente?.let {
+        if (esFactura && (it.tipoDoc != TIPO_DOC_RUC || it.numeroDoc.filter { c -> c.isDigit() }.length != 11)) {
+            return null
+        }
+        return it.aCompany()
+    }
     val doc = docManual.filter { it.isDigit() }
     val nombre = nombreManual.trim()
     if (doc.isBlank() || nombre.isBlank()) return null
     val tipoDoc = when {
         esBoleta -> TIPO_DOC_DNI
+        esFactura -> if (doc.length == 11) TIPO_DOC_RUC else return null
         doc.length == 11 -> TIPO_DOC_RUC
         else -> TIPO_DOC_DNI
     }

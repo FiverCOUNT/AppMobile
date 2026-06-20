@@ -1,5 +1,6 @@
 package com.factapp.jhonny.network.dto.model
 
+import com.factapp.jhonny.network.dto.parseFechaEmisionIso
 import com.google.gson.annotations.SerializedName
 
 /**
@@ -27,7 +28,7 @@ data class Invoice(
     @SerializedName(value = "correlativo", alternate = ["numero"])
     val correlativo: String,
     @SerializedName("fecha_emision")
-    val fechaEmision: String? = null,
+    val fechaEmision: Long? = null,
     @SerializedName(value = "fec_vencimiento", alternate = ["fecha_vencimiento"])
     val fecVencimiento: String? = null,
     @SerializedName("tipo_moneda")
@@ -90,12 +91,9 @@ data class Invoice(
     @SerializedName("cdr_zip_url")
     val cdrZipUrl: String? = null,
     @SerializedName("xml_url")
-    val xmlUrlDirecto: String? = null,
-    /** JSON anidado legacy: `"archivos": { "xml", "pdf", "cdr" }`. */
-    @SerializedName("archivos")
-    val archivosJson: ArchivosJson? = null,
+    val xmlUrl: String? = null,
 
-    // — Respuesta SUNAT (antes ComprobanteSunat) —
+    // — Respuesta SUNAT —
     @SerializedName("sunat_estado")
     val sunatEstadoDirecto: String? = null,
     @SerializedName("sunat_codigo")
@@ -104,14 +102,22 @@ data class Invoice(
     val sunatDescripcionDirecto: String? = null,
     @SerializedName("sunat_notas")
     val sunatNotasDirecto: List<String>? = null,
-    @SerializedName("hash_cpe")
-    val hashCpeDirecto: String? = null,
+    @SerializedName(value = "hash", alternate = ["hash_cpe"])
+    val hash: String? = null,
     /** JSON anidado legacy: `"sunat": { "estado", "codigo", … }`. */
     @SerializedName("sunat")
     val sunatJson: SunatJson? = null,
 
     @SerializedName("enviar_automatico")
     val enviarAutomatico: Boolean? = null,
+
+    /** Respuesta del API al emitir (BackEndEasy → mobile). */
+    val success: Boolean? = null,
+    @SerializedName("sunat_ok")
+    val sunatOk: Boolean? = null,
+    @SerializedName("puede_reenviar")
+    val puedeReenviar: Boolean? = null,
+    val message: String? = null,
 ) {
     /** Tipo normalizado para UI/API legado (FACTURA, BOLETA, …). */
     val tipo: String
@@ -204,16 +210,7 @@ data class Invoice(
         get() = sunatNotasDirecto ?: sunatJson?.notas
 
     val hashCpe: String?
-        get() = hashCpeDirecto ?: sunatJson?.hashCpe
-
-    val xmlUrl: String?
-        get() = xmlUrlDirecto ?: archivosJson?.xml
-
-    val pdfUrlEfectivo: String?
-        get() = pdfUrl ?: archivosJson?.pdf
-
-    val cdrZipUrlEfectivo: String?
-        get() = cdrZipUrl ?: archivosJson?.cdr
+        get() = hash ?: sunatJson?.hashCpe
 
     fun normalizado(): Invoice {
         val tipoNormalizado = normalizarTipoDocumento(tipoDoc)
@@ -224,8 +221,6 @@ data class Invoice(
             correlativo = correlativoNormalizado,
             estado = estadoNormalizado,
             motivoNota = motivoNota ?: documentoAfectado?.motivoNota ?: documentoAfectado?.motivoDescripcion,
-            pdfUrl = pdfUrlEfectivo,
-            cdrZipUrl = cdrZipUrlEfectivo,
         )
     }
 
@@ -249,7 +244,7 @@ data class Invoice(
             correlativo = correlativo,
             motivoCodigo = motivoCodigo,
             motivoNota = motivoDescripcion,
-            fechaEmision = fechaEmision,
+            fechaEmision = parseFechaEmisionIso(fechaEmision),
         )
 
         /** Parsea `F001-00001234` → referencia (tipo por defecto factura). */
@@ -292,12 +287,13 @@ private fun normalizarTipoDocumento(tipoRaw: String): String = when (tipoRaw.tri
     else -> tipoRaw
 }
 
-private fun parseEstadoSunat(estadoRaw: String): ComprobanteEstado = when (estadoRaw.trim().uppercase()) {
-    "ACEPTADO" -> ComprobanteEstado.ACEPTADO
-    "ENVIADO", "EN_PROCESO", "PENDIENTE" -> ComprobanteEstado.ENVIADO
-    "RECHAZADO", "ERROR" -> ComprobanteEstado.RECHAZADO
+private fun parseEstadoSunat(estadoRaw: String): ComprobanteEstado? = when (estadoRaw.trim().uppercase()) {
+    "ACEPTADO", "ACEPTADA" -> ComprobanteEstado.ACEPTADO
+    "ENVIADO", "GENERADA", "ENVIADA", "PROCESANDO", "EN_PROCESO", "PENDIENTE" -> ComprobanteEstado.ENVIADO
+    "RECHAZADO", "RECHAZADA", "ERROR" -> ComprobanteEstado.RECHAZADO
     "ANULADO", "ANULACION_EN_PROCESO" -> ComprobanteEstado.ANULADO
-    else -> ComprobanteEstado.BORRADOR
+    "BORRADOR" -> ComprobanteEstado.BORRADOR
+    else -> null
 }
 
 /** Deserialización JSON anidado `"sunat": { … }` (legacy API). */
@@ -306,13 +302,6 @@ data class SunatJson(
     val codigo: String? = null,
     val descripcion: String? = null,
     val notas: List<String>? = null,
-    @SerializedName("hash_cpe")
+    @SerializedName(value = "hash", alternate = ["hash_cpe"])
     val hashCpe: String? = null,
-)
-
-/** Deserialización JSON anidado `"archivos": { … }` (legacy API). */
-data class ArchivosJson(
-    val xml: String? = null,
-    val cdr: String? = null,
-    val pdf: String? = null,
 )

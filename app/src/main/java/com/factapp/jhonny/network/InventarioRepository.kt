@@ -1,26 +1,19 @@
 package com.factapp.jhonny.network
 
+import com.factapp.jhonny.network.dto.ordenadosPorFechaReciente
 import com.factapp.jhonny.network.dto.model.Almacen
 import com.factapp.jhonny.network.dto.model.InventarioSaldo
-import com.factapp.jhonny.network.dto.request.CrearAlmacenRequest
 import com.factapp.jhonny.network.dto.model.Movimiento
-import com.factapp.jhonny.network.dto.model.MovimientoEstado
-import com.factapp.jhonny.network.dto.model.LineaCatalogoItem
-import com.factapp.jhonny.network.dto.model.lineaCatalogoConSerie
-import com.factapp.jhonny.network.dto.model.lineaCatalogoSinSerie
-import com.factapp.jhonny.network.dto.model.ProductoSerie
-import com.factapp.jhonny.network.dto.model.ProductoSerieEstado
-import com.factapp.jhonny.network.dto.demo.InventarioDemo
 import com.factapp.jhonny.network.dto.model.MovimientoTipo
+import com.factapp.jhonny.network.dto.model.sanitizarDesdeApi
+import com.factapp.jhonny.network.dto.model.ProductoDevolucionCliente
+import com.factapp.jhonny.network.dto.model.ProductoSerie
+import com.factapp.jhonny.network.dto.model.UbicacionProducto
+import com.factapp.jhonny.network.dto.request.CrearAlmacenRequest
 import com.factapp.jhonny.network.dto.request.RegistrarEntradaRequest
 import com.factapp.jhonny.network.dto.request.RegistrarSalidaRequest
-import com.factapp.jhonny.network.dto.model.resumenSeries
-import java.time.Instant
 
-/**
- * Almacén, series y movimientos desde el servidor.
- * Si el endpoint no existe aún, usa [InventarioDemo] sin romper la app.
- */
+/** Almacén, series y movimientos contra BackEndEasy (solo API real). */
 object InventarioRepository {
 
     suspend fun listarInventario(
@@ -29,49 +22,28 @@ object InventarioRepository {
         almacenId: String? = null,
         catalogItemId: String? = null,
         soloConStock: Boolean = true,
-    ): Result<List<InventarioSaldo>> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
-        }
-        if (token.isNullOrBlank()) {
-            return Result.failure(IllegalStateException("Inicia sesión para consultar inventario"))
-        }
-        return try {
-            Result.success(
-                RetrofitClient.api.listarInventario(
-                    ruc = companyRuc,
-                    authorization = bearer(token),
-                    almacenId = almacenId?.takeIf { it.isNotBlank() },
-                    catalogItemId = catalogItemId?.takeIf { it.isNotBlank() },
-                    soloConStock = soloConStock,
-                ),
-            )
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    ): Result<List<InventarioSaldo>> = apiCall(companyRuc, token, "consultar inventario") { authToken ->
+        RetrofitClient.api.listarInventario(
+            ruc = companyRuc,
+            authorization = bearer(authToken),
+            almacenId = almacenId?.takeIf { it.isNotBlank() },
+            catalogItemId = catalogItemId?.takeIf { it.isNotBlank() },
+            soloConStock = soloConStock,
+        )
     }
 
     suspend fun listarAlmacenes(
         companyRuc: String,
         token: String?,
         soloActivos: Boolean = true,
-    ): Result<List<Almacen>> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
-        }
-        if (token.isNullOrBlank()) {
-            return Result.failure(IllegalStateException("Inicia sesión para consultar almacenes"))
-        }
-        return try {
-            val lista = RetrofitClient.api.listarAlmacenes(
-                ruc = companyRuc,
-                authorization = bearer(token),
-                soloActivos = soloActivos,
-            )
-            Result.success(lista.filter { it.activo || !soloActivos })
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        todos: Boolean = false,
+    ): Result<List<Almacen>> = apiCall(companyRuc, token, "consultar almacenes") { authToken ->
+        RetrofitClient.api.listarAlmacenes(
+            ruc = companyRuc,
+            authorization = bearer(authToken),
+            soloActivos = soloActivos,
+            todos = if (todos) true else null,
+        ).filter { it.activo || !soloActivos }
     }
 
     suspend fun crearAlmacen(
@@ -79,21 +51,11 @@ object InventarioRepository {
         token: String?,
         body: CrearAlmacenRequest,
     ): Result<Almacen> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
-        }
         if (body.codigo.isBlank() || body.nombre.isBlank()) {
             return Result.failure(IllegalArgumentException("Código y nombre son obligatorios"))
         }
-        if (token.isNullOrBlank()) {
-            return Result.failure(IllegalStateException("Inicia sesión para crear almacenes"))
-        }
-        return try {
-            Result.success(
-                RetrofitClient.api.crearAlmacen(companyRuc, bearer(token), body),
-            )
-        } catch (e: Exception) {
-            Result.failure(e)
+        return apiCall(companyRuc, token, "crear almacenes") { authToken ->
+            RetrofitClient.api.crearAlmacen(companyRuc, bearer(authToken), body)
         }
     }
 
@@ -102,44 +64,24 @@ object InventarioRepository {
         catalogItemId: String,
         token: String?,
         almacenId: String? = null,
-        usarRespaldoSiVacio: Boolean = false,
-    ): Result<List<ProductoSerie>> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
-        }
-        if (token.isNullOrBlank()) {
-            return Result.success(
-                seriesConRespaldo(companyRuc, catalogItemId, almacenId, usarRespaldoSiVacio),
-            )
-        }
-        return try {
-            Result.success(
-                RetrofitClient.api.listarSeriesDisponibles(
-                    ruc = companyRuc,
-                    catalogItemId = catalogItemId,
-                    authorization = bearer(token),
-                    almacenId = almacenId?.takeIf { it.isNotBlank() },
-                ),
-            )
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    ): Result<List<ProductoSerie>> = apiCall(companyRuc, token, "consultar series") { authToken ->
+        RetrofitClient.api.listarSeriesDisponibles(
+            ruc = companyRuc,
+            catalogItemId = catalogItemId,
+            authorization = bearer(authToken),
+            almacenId = almacenId?.takeIf { it.isNotBlank() },
+        )
     }
 
-    private fun seriesConRespaldo(
+    suspend fun listarProductosDevolucion(
         companyRuc: String,
-        catalogItemId: String,
-        almacenId: String?,
-        usarRespaldoSiVacio: Boolean,
-    ): List<ProductoSerie> {
-        val demo = InventarioDemo.seriesDisponibles(companyRuc, catalogItemId, almacenId)
-        if (demo.isNotEmpty()) return demo
-        if (!usarRespaldoSiVacio) return emptyList()
-        return InventarioDemo.seriesGeneradas(
-            companyRuc = companyRuc,
-            catalogItemId = catalogItemId,
-            almacenId = almacenId,
-            cantidad = 20,
+        token: String?,
+        clienteId: String,
+    ): Result<List<ProductoDevolucionCliente>> = apiCall(companyRuc, token, "consultar devoluciones") { authToken ->
+        RetrofitClient.api.listarProductosDevolucion(
+            ruc = companyRuc,
+            authorization = bearer(authToken),
+            clienteId = clienteId,
         )
     }
 
@@ -147,165 +89,86 @@ object InventarioRepository {
         companyRuc: String,
         token: String?,
         body: RegistrarEntradaRequest,
-    ): Result<Movimiento> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
-        }
-        if (token.isNullOrBlank()) {
-            return Result.failure(IllegalStateException("Inicia sesión para registrar ingresos"))
-        }
-        return try {
-            Result.success(
-                RetrofitClient.api.registrarEntrada(companyRuc, bearer(token), body),
-            )
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    ): Result<Movimiento> = apiCall(companyRuc, token, "registrar ingresos") { authToken ->
+        RetrofitClient.api.registrarEntrada(companyRuc, bearer(authToken), body.toApiBody())
+            .sanitizarDesdeApi()
     }
 
     suspend fun registrarSalida(
         companyRuc: String,
         token: String?,
         body: RegistrarSalidaRequest,
-    ): Result<Movimiento> = llamar(
-        companyRuc = companyRuc,
-        token = token,
-        demo = { salidaDemo(body) },
-    ) {
-        RetrofitClient.api.registrarSalida(companyRuc, bearer(token), body)
+    ): Result<Movimiento> = apiCall(companyRuc, token, "registrar salidas") { authToken ->
+        RetrofitClient.api.registrarSalida(companyRuc, bearer(authToken), body)
+            .sanitizarDesdeApi()
     }
 
     suspend fun listarSalidas(
         companyRuc: String,
         token: String?,
-    ): Result<List<Movimiento>> = llamar(
-        companyRuc = companyRuc,
-        token = token,
-        demo = { InventarioDemo.salidasDemo(companyRuc) },
-    ) {
-        RetrofitClient.api.listarSalidas(companyRuc, bearer(token))
+    ): Result<List<Movimiento>> = apiCall(companyRuc, token, "ver salidas") { authToken ->
+        RetrofitClient.api.listarSalidas(companyRuc, bearer(authToken))
+            .map { it.sanitizarDesdeApi() }
+            .ordenadosPorFechaReciente()
     }
 
     suspend fun listarIngresos(
         companyRuc: String,
         token: String?,
-    ): Result<List<Movimiento>> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
-        }
-        if (token.isNullOrBlank()) {
-            return Result.failure(IllegalStateException("Inicia sesión para ver ingresos"))
-        }
-        return try {
-            Result.success(
-                RetrofitClient.api.listarMovimientos(
-                    ruc = companyRuc,
-                    authorization = bearer(token),
-                    tipo = MovimientoTipo.ENTRADA.name,
-                ),
-            )
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    ): Result<List<Movimiento>> = apiCall(companyRuc, token, "ver ingresos") { authToken ->
+        RetrofitClient.api.listarMovimientos(
+            ruc = companyRuc,
+            authorization = bearer(authToken),
+            tipo = MovimientoTipo.ENTRADA.name,
+        ).map { it.sanitizarDesdeApi() }.ordenadosPorFechaReciente()
     }
 
-    suspend fun listarHistorial(
+    suspend fun listarMovimientosCliente(
         companyRuc: String,
         token: String?,
-    ): Result<List<Movimiento>> = llamar(
-        companyRuc = companyRuc,
-        token = token,
-        demo = { InventarioDemo.historialDemo(companyRuc) },
-    ) {
-        val movimientos = RetrofitClient.api.listarMovimientos(companyRuc, bearer(token))
-        val salidas = RetrofitClient.api.listarSalidas(companyRuc, bearer(token))
-        (movimientos + salidas)
-            .distinctBy { it.id }
-            .sortedByDescending { it.fechaEfectiva }
+        clienteId: String,
+    ): Result<List<Movimiento>> = apiCall(companyRuc, token, "ver historial del cliente") { authToken ->
+        RetrofitClient.api.listarMovimientos(
+            ruc = companyRuc,
+            authorization = bearer(authToken),
+            clienteId = clienteId,
+        ).map { it.sanitizarDesdeApi() }.ordenadosPorFechaReciente()
     }
 
-    private suspend fun <T> llamar(
+    suspend fun buscarUbicaciones(
         companyRuc: String,
         token: String?,
-        demo: () -> T,
-        api: suspend () -> T,
+        query: String,
+        modo: String,
+    ): Result<List<UbicacionProducto>> = apiCall(companyRuc, token, "consultar historial del ítem") { authToken ->
+        val q = query.trim()
+        if (q.length < 2) return@apiCall emptyList()
+        RetrofitClient.api.buscarUbicaciones(
+            ruc = companyRuc,
+            authorization = bearer(authToken),
+            query = q,
+            modo = modo,
+        ).ordenadosPorFechaReciente()
+    }
+
+    private suspend fun <T> apiCall(
+        companyRuc: String,
+        token: String?,
+        accion: String,
+        block: suspend (String) -> T,
     ): Result<T> {
         if (companyRuc.isBlank()) {
             return Result.failure(IllegalArgumentException("Empresa sin RUC"))
         }
         if (token.isNullOrBlank()) {
-            return Result.success(demo())
+            return Result.failure(IllegalStateException("Inicia sesión para $accion"))
         }
         return try {
-            Result.success(api())
-        } catch (_: Exception) {
-            Result.success(demo())
+            Result.success(block(token))
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
-    private fun bearer(token: String?) = "Bearer $token"
-
-    private fun movimientoDemoEntrada(body: RegistrarEntradaRequest): Movimiento = Movimiento(
-        id = "demo-mov-${System.currentTimeMillis()}",
-        companyRuc = body.companyRuc,
-        almacenId = body.almacenId,
-        tipo = MovimientoTipo.ENTRADA,
-        referenciaTipo = "INGRESO_MANUAL",
-        lineas = body.lineas.map { linea ->
-            LineaCatalogoItem(
-                catalogItemId = linea.catalogItemId,
-                cantidad = linea.cantidad,
-                numerosSerie = linea.numerosSerie.orEmpty(),
-                serieIds = linea.serieIds,
-            )
-        },
-        fecha = Instant.now().toString(),
-        observaciones = body.observaciones,
-    )
-
-    private fun salidaDemo(body: RegistrarSalidaRequest): Movimiento {
-        val movimientoId = "demo-ent-${System.currentTimeMillis()}"
-        return Movimiento(
-            id = movimientoId,
-            companyRuc = body.companyRuc,
-            almacenId = body.almacenId,
-            almacenDestinoId = body.almacenDestinoId,
-            tipo = MovimientoTipo.SALIDA,
-            numero = "ENT-${movimientoId.takeLast(5).uppercase()}",
-            estado = MovimientoEstado.DESPACHADA,
-            comprobanteId = body.comprobanteId,
-            guiaRemisionId = body.guiaRemisionId,
-            lineas = body.lineas.map { linea ->
-                val serieId = linea.serieIds?.firstOrNull()
-                if (serieId != null) {
-                    val serie = InventarioDemo.seriesDisponibles(body.companyRuc, linea.catalogItemId)
-                        .firstOrNull { it.id == serieId }
-                        ?.copy(
-                            almacenId = body.almacenId,
-                            estado = ProductoSerieEstado.ENTREGADO,
-                            entregaId = movimientoId,
-                        )
-                        ?: ProductoSerie(
-                            id = serieId,
-                            companyRuc = body.companyRuc,
-                            catalogItemId = linea.catalogItemId,
-                            numeroSerie = serieId,
-                            almacenId = body.almacenId,
-                            estado = ProductoSerieEstado.ENTREGADO,
-                            entregaId = movimientoId,
-                        )
-                    lineaCatalogoConSerie(serie = serie, cantidad = linea.cantidad)
-                } else {
-                    lineaCatalogoSinSerie(
-                        catalogItemId = linea.catalogItemId,
-                        cantidad = linea.cantidad,
-                    )
-                }
-            },
-            fecha = Instant.now().toString(),
-            cliente = body.cliente,
-            fechaDespacho = Instant.now().toString(),
-            referenciaTipo = if (body.almacenDestinoId != null) "TRASLADO" else "SALIDA",
-        )
-    }
+    private fun bearer(token: String) = "Bearer $token"
 }

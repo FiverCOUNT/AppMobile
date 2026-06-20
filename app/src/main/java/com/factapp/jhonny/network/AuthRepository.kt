@@ -1,6 +1,7 @@
 package com.factapp.jhonny.network
 
 import android.content.Context
+import com.factapp.jhonny.data.local.ConfiguracionLocal
 import com.factapp.jhonny.data.local.LoginPreferences
 import com.factapp.jhonny.data.local.SesionStore
 import com.factapp.jhonny.data.local.toUsuarioEntity
@@ -33,9 +34,7 @@ object AuthRepository {
             ),
         )
         val session = envelope.requireData("Inicio de sesión")
-        val usuario = session.toUsuarioEntity().requireTokenValido()
-        runCatching { persistirSesion(context, usuario, recordarSesion, email) }
-        Result.success(usuario)
+        aplicarSesion(context, session, recordarSesion, email)
     } catch (e: HttpException) {
         Result.failure(e)
     } catch (e: JsonSyntaxException) {
@@ -46,8 +45,10 @@ object AuthRepository {
         Result.failure(
             IllegalStateException("Error al leer datos de la empresa en la respuesta de login.", e),
         )
-    } catch (e: Exception) {
-        Result.failure(e)
+    } catch (e: Throwable) {
+        Result.failure(
+            e as? Exception ?: Exception(e.message ?: "Error inesperado al iniciar sesión", e),
+        )
     }
 
     /**
@@ -65,12 +66,40 @@ object AuthRepository {
             )
         return try {
             val envelope = RetrofitClient.api.refresh(RefreshTokenRequest(refresh))
-            val session = envelope.requireData("Renovación de sesión")
-            val usuario = session.toUsuarioEntity().requireTokenValido()
-        if (LoginPreferences.recordarSesion(context)) {
-            runCatching { persistirSesion(context, usuario, true, usuario.email) }
+            aplicarSesion(context, envelope.requireData("Renovación de sesión"), LoginPreferences.recordarSesion(context), actual.email)
+        } catch (e: HttpException) {
+            if (e.code() == 401 || e.code() == 403) {
+                limpiarSesionLocal(context)
+            }
+            Result.failure(e)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
-            Result.success(usuario)
+    }
+
+    /**
+     * Recarga perfil, empresa, series y almacenes desde el servidor (p. ej. botón Actualizar del dashboard).
+     */
+    suspend fun sincronizarSesion(
+        context: Context,
+        sesionActual: Usuario? = null,
+    ): Result<Usuario> {
+        val actual = sesionActual ?: SesionStore.obtenerSesionReciente(context)
+            ?: return Result.failure(
+                IllegalStateException("No hay sesión activa. Inicia sesión de nuevo."),
+            )
+        val token = actual.token?.takeIf { it.isNotBlank() }
+            ?: return Result.failure(
+                IllegalStateException("La sesión no tiene token válido."),
+            )
+        return try {
+            val envelope = RetrofitClient.api.me("Bearer $token")
+            aplicarSesion(
+                context,
+                envelope.requireData("Sincronización"),
+                LoginPreferences.recordarSesion(context),
+                actual.email,
+            )
         } catch (e: HttpException) {
             if (e.code() == 401 || e.code() == 403) {
                 limpiarSesionLocal(context)
@@ -82,7 +111,14 @@ object AuthRepository {
     }
 
     suspend fun limpiarSesionLocal(context: Context) {
+        ConfiguracionLocal.limpiar(context)
         SesionStore.eliminar(context)
+    }
+
+    /** Cierra sesión: borra tokens en Room y desactiva "Recordarme" / huella. */
+    suspend fun cerrarSesion(context: Context) {
+        limpiarSesionLocal(context)
+        LoginPreferences.guardar(context, recordar = false, email = "")
     }
 
     suspend fun restaurarSesionLocal(context: Context): Usuario? {
@@ -93,16 +129,40 @@ object AuthRepository {
     suspend fun puedeUsarBiometria(context: Context): Boolean =
         LoginPreferences.puedeUsarBiometria(context)
 
+    private suspend fun aplicarSesion(
+        context: Context,
+        session: com.factapp.jhonny.network.dto.model.UsuarioSesionApi,
+        persistir: Boolean,
+        email: String,
+    ): Result<Usuario> {
+        ConfiguracionLocal.guardar(context, session.configuracion)
+        val usuario = session.toUsuarioEntity().requireTokenValido()
+        if (!persistir) {
+            return Result.success(usuario)
+        }
+        return persistirSesion(context, usuario, true, email).fold(
+            onSuccess = { Result.success(usuario) },
+            onFailure = { error ->
+                Result.failure(
+                    IllegalStateException(
+                        "Datos recibidos pero no se pudo guardar la sesión local. ${error.message ?: ""}".trim(),
+                        error,
+                    ),
+                )
+            },
+        )
+    }
+
     private suspend fun persistirSesion(
         context: Context,
         usuario: Usuario,
         recordarSesion: Boolean,
         email: String,
-    ) {
+    ): Result<Unit> = runCatching {
         LoginPreferences.guardar(context, recordarSesion, email)
         if (!recordarSesion) {
             SesionStore.eliminar(context)
-            return
+            return@runCatching
         }
         if (usuario.company?.ruc.isNullOrBlank()) {
             SesionStore.guardarSinEmpresa(context, usuario.copy(company = null))
@@ -126,17 +186,23 @@ object AuthRepository {
     }
 }
 
-fun Throwable.mensajeAuth(): String = when (this) {
+fun Throwable.mensajeAuth(): String = runCatching { mensajeAuthInterno() }
+    .getOrElse { "No se pudo completar la operación. Revisa la red y que BackEndEasy esté en marcha." }
+
+private fun Throwable.mensajeAuthInterno(): String = when (this) {
     is HttpException -> {
-        val body = response()?.errorBody()?.string()
+        val code = code()
+        val body = runCatching { response()?.errorBody()?.string() }.getOrNull()
         if (!body.isNullOrBlank()) {
             runCatching {
                 Gson().fromJson(body, com.factapp.jhonny.network.dto.ApiErrorBody::class.java)
             }.getOrNull()?.message?.takeIf { it.isNotBlank() } ?: body
         } else {
-            "Error del servidor (${code()})"
+            message()?.takeIf { it.isNotBlank() }
+                ?: "Error del servidor ($code)"
         }
     }
-    is IllegalStateException -> message ?: "Operación no completada"
-    else -> message ?: "No se pudo conectar con el servidor. Revisa la red y la URL del API."
+    is IllegalStateException -> message?.takeIf { it.isNotBlank() } ?: "Operación no completada"
+    else -> message?.takeIf { it.isNotBlank() }
+        ?: "No se pudo conectar con el servidor. Revisa la red y la URL del API."
 }

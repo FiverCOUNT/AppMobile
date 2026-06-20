@@ -26,7 +26,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Input
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Menu
@@ -76,7 +75,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
+import com.factapp.jhonny.data.local.serieConfigurada
 import com.factapp.jhonny.modelos.Usuario
+import com.factapp.jhonny.modelos.esAdmin
+import com.factapp.jhonny.network.AuthRepository
 import com.factapp.jhonny.network.ComprobanteRepository
 import com.factapp.jhonny.network.dto.companyRucParaCatalogo
 import com.factapp.jhonny.network.dto.etiquetaTipo
@@ -86,6 +89,7 @@ import com.factapp.jhonny.network.dto.model.ComprobanteEstado
 import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.model.InvoiceTipoDoc
 import com.factapp.jhonny.ui.components.ApplySystemBarsColor
+import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
 import com.factapp.jhonny.ui.components.PartialOptionCard
 import com.factapp.jhonny.ui.components.PartialOptionsBottomSheet
 import com.factapp.jhonny.ui.components.PartialSheetTheme
@@ -197,6 +201,8 @@ private val DashboardProgressTrack = Color(0xFFD4D8DE)
 fun DashboardScreen(
     modifier: Modifier = Modifier,
     usuario: Usuario? = null,
+    abrirMenuEmitir: Boolean = false,
+    onMenuEmitirConsumido: () -> Unit = {},
     onNuevaFactura: () -> Unit = {},
     onClientes: () -> Unit = {},
     onCatalogo: () -> Unit = {},
@@ -206,12 +212,12 @@ fun DashboardScreen(
     onSalidas: () -> Unit = {},
     onIngresos: () -> Unit = {},
     onHistorial: () -> Unit = {},
-    onInventario: () -> Unit = {},
     onAlmacenes: () -> Unit = {},
     onComprobantesEmitidos: () -> Unit = {},
     onConfiguracion: () -> Unit = {},
+    onSesionActualizada: (Usuario) -> Unit = {},
 ) {
-    var tabSeleccionado by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
     var mostrarMenuEmitir by remember { mutableStateOf(false) }
     var mostrarMenuMas by remember { mutableStateOf(false) }
     var refrescando by remember { mutableStateOf(false) }
@@ -225,6 +231,7 @@ fun DashboardScreen(
 
     val companyRuc = usuario?.companyRucParaCatalogo().orEmpty()
     val token = usuario?.token
+    val esAdmin = usuario?.esAdmin() == true
     val nombreSaludo = usuario?.company?.nombre
         ?: usuario?.email?.substringBefore("@")
         ?: "Usuario"
@@ -271,10 +278,21 @@ fun DashboardScreen(
         }
     }
 
+    LaunchedEffect(abrirMenuEmitir) {
+        if (abrirMenuEmitir) {
+            mostrarMenuEmitir = true
+            onMenuEmitirConsumido()
+        }
+    }
+
     fun refrescarDashboard() {
         scope.launch {
             refrescando = true
             try {
+                AuthRepository.sincronizarSesion(context, usuario)
+                    .onSuccess { actualizado ->
+                        onSesionActualizada(actualizado)
+                    }
                 cargarDashboard()
             } catch (_: Exception) {
                 comprobantesResumen = emptyList()
@@ -288,48 +306,36 @@ fun DashboardScreen(
     }
 
     ApplySystemBarsColor(
-        statusBarColor = DashboardBg,
+        statusBarColor = ComprobanteEmitColors.topBar,
         navigationBarColor = DashboardCard,
-        lightStatusBarIcons = true,
+        lightStatusBarIcons = false,
         lightNavigationBarIcons = true,
     )
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = DashboardBg,
-        bottomBar = {
-            DashboardBottomBar(
-                tabSeleccionado = tabSeleccionado,
-                onTabSelected = { tabSeleccionado = it },
-                onEmitirClick = {
-                    tabSeleccionado = 1
-                    mostrarMenuEmitir = true
-                },
-                onComprobantesClick = onComprobantesEmitidos,
-                onConfiguracionClick = onConfiguracion,
-            )
-        },
+        contentWindowInsets = scaffoldContentWithoutTopInset(),
     ) { innerPadding ->
         PullToRefreshBox(
             isRefreshing = refrescando,
             onRefresh = { refrescarDashboard() },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(bottom = innerPadding.calculateBottomPadding()),
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .statusBarsPadding()
                     .verticalScroll(rememberScrollState()),
             ) {
-                DashboardHeader(
+                DashboardTopHeader(
                     nombreSaludo = nombreSaludo,
                     onRefresh = { refrescarDashboard() },
                     refrescando = refrescando || cargandoInicial,
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 ResumenFacturacionCard(
                     ventasMes = if (cargandoInicial && !refrescando) "—" else formatearSoles(ventasMes),
@@ -360,7 +366,7 @@ fun DashboardScreen(
                         fontWeight = FontWeight.Bold,
                         color = DashboardNavy,
                     ),
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -379,7 +385,7 @@ fun DashboardScreen(
                         text = "No hay comprobantes recientes",
                         color = DashboardTextMuted,
                         fontSize = 14.sp,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 } else {
                     comprobantesResumen.forEachIndexed { index, item ->
@@ -417,6 +423,7 @@ fun DashboardScreen(
             theme = PartialSheetTheme.Emit,
         ) {
             MenuEmitirComprobanteOpciones(
+                context = context,
                 onTipoSeleccionado = { tipo ->
                     mostrarMenuEmitir = false
                     onEmitirComprobante(tipo)
@@ -433,6 +440,7 @@ fun DashboardScreen(
             theme = PartialSheetTheme.Dashboard,
         ) {
             MenuMasOpciones(
+                esAdmin = esAdmin,
                 onCompras = {
                     mostrarMenuMas = false
                     onCompras()
@@ -449,10 +457,6 @@ fun DashboardScreen(
                     mostrarMenuMas = false
                     onHistorial()
                 },
-                onInventario = {
-                    mostrarMenuMas = false
-                    onInventario()
-                },
                 onAlmacenes = {
                     mostrarMenuMas = false
                     onAlmacenes()
@@ -464,24 +468,26 @@ fun DashboardScreen(
 
 @Composable
 private fun MenuMasOpciones(
+    esAdmin: Boolean,
     onCompras: () -> Unit,
     onSalidas: () -> Unit,
     onIngresos: () -> Unit,
     onHistorial: () -> Unit,
-    onInventario: () -> Unit,
     onAlmacenes: () -> Unit,
 ) {
-    PartialOptionCard(
-        icon = Icons.Default.ShoppingCart,
-        titulo = "Compras",
-        detalle = "Compras registradas como empresa",
-        theme = PartialSheetTheme.Dashboard,
-        iconTint = Color(0xFFEF6C00),
-        iconBackground = Color(0xFFFFE0B2),
-        tituloColor = Color(0xFFE65100),
-        onClick = onCompras,
-    )
-    Spacer(modifier = Modifier.height(10.dp))
+    if (esAdmin) {
+        PartialOptionCard(
+            icon = Icons.Default.ShoppingCart,
+            titulo = "Compras",
+            detalle = "Compras registradas como empresa",
+            theme = PartialSheetTheme.Dashboard,
+            iconTint = Color(0xFFEF6C00),
+            iconBackground = Color(0xFFFFE0B2),
+            tituloColor = Color(0xFFE65100),
+            onClick = onCompras,
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+    }
     PartialOptionCard(
         icon = Icons.Default.LocalShipping,
         titulo = "Salidas",
@@ -492,54 +498,48 @@ private fun MenuMasOpciones(
         tituloColor = Color(0xFF0D47A1),
         onClick = onSalidas,
     )
-    Spacer(modifier = Modifier.height(10.dp))
-    PartialOptionCard(
-        icon = Icons.Default.Input,
-        titulo = "Ingresos",
-        detalle = "Entradas de mercadería al inventario",
-        theme = PartialSheetTheme.Dashboard,
-        iconTint = Color(0xFF2E7D32),
-        iconBackground = Color(0xFFC8E6C9),
-        tituloColor = Color(0xFF1B5E20),
-        onClick = onIngresos,
-    )
+    if (esAdmin) {
+        Spacer(modifier = Modifier.height(10.dp))
+        PartialOptionCard(
+            icon = Icons.Default.Input,
+            titulo = "Ingresos",
+            detalle = "Entradas de mercadería al inventario",
+            theme = PartialSheetTheme.Dashboard,
+            iconTint = Color(0xFF2E7D32),
+            iconBackground = Color(0xFFC8E6C9),
+            tituloColor = Color(0xFF1B5E20),
+            onClick = onIngresos,
+        )
+    }
     Spacer(modifier = Modifier.height(10.dp))
     PartialOptionCard(
         icon = Icons.Default.History,
         titulo = "Historial",
-        detalle = "Vida del producto · trazabilidad",
+        detalle = "Trazabilidad por ítem · serie o nombre",
         theme = PartialSheetTheme.Dashboard,
         iconTint = Color(0xFF6A1B9A),
         iconBackground = Color(0xFFE1BEE7),
         tituloColor = Color(0xFF4A148C),
         onClick = onHistorial,
     )
-    Spacer(modifier = Modifier.height(10.dp))
-    PartialOptionCard(
-        icon = Icons.Default.Inventory2,
-        titulo = "Inventario",
-        detalle = "Stock actual de productos por almacén",
-        theme = PartialSheetTheme.Dashboard,
-        iconTint = Color(0xFF4527A0),
-        iconBackground = Color(0xFFD1C4E9),
-        tituloColor = Color(0xFF311B92),
-        onClick = onInventario,
-    )
-    Spacer(modifier = Modifier.height(10.dp))
-    PartialOptionCard(
-        icon = Icons.Default.Store,
-        titulo = "Almacenes",
-        detalle = "Bodegas y ubicaciones de stock",
-        theme = PartialSheetTheme.Dashboard,
-        iconTint = Color(0xFF00838F),
-        iconBackground = Color(0xFFB2EBF2),
-        tituloColor = Color(0xFF006064),
-        onClick = onAlmacenes,
-    )
+    if (esAdmin) {
+        Spacer(modifier = Modifier.height(10.dp))
+        PartialOptionCard(
+            icon = Icons.Default.Store,
+            titulo = "Almacenes",
+            detalle = "Bodegas y ubicaciones de stock",
+            theme = PartialSheetTheme.Dashboard,
+            iconTint = Color(0xFF00838F),
+            iconBackground = Color(0xFFB2EBF2),
+            tituloColor = Color(0xFF006064),
+            onClick = onAlmacenes,
+        )
+    }
 }
 
 @Composable
 private fun MenuEmitirComprobanteOpciones(
+    context: android.content.Context,
     onTipoSeleccionado: (TipoComprobante) -> Unit,
 ) {
     TipoComprobante.entries.forEachIndexed { index, tipo ->
@@ -548,7 +548,7 @@ private fun MenuEmitirComprobanteOpciones(
         PartialOptionCard(
             icon = tipo.emitirMenuIcon(),
             titulo = tipo.titulo,
-            detalle = "Serie ${tipo.serie} · ${tipo.detalle} · SUNAT",
+            detalle = "Serie ${tipo.serieConfigurada(context)} · ${tipo.detalle} · SUNAT",
             theme = PartialSheetTheme.Emit,
             iconTint = colores.iconTint,
             iconBackground = colores.iconBackground,
@@ -601,48 +601,68 @@ private fun TipoComprobante.emitirMenuColors(): EmitirMenuColors = when (this) {
 }
 
 @Composable
-private fun DashboardHeader(
+private fun DashboardTopHeader(
     nombreSaludo: String,
     onRefresh: () -> Unit,
     refrescando: Boolean,
 ) {
-    Row(
+    val barColor = ComprobanteEmitColors.topBar
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .background(barColor),
     ) {
-        Text(
-            text = "Hola, $nombreSaludo",
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            style = MaterialTheme.typography.titleLarge.copy(
-                fontWeight = FontWeight.SemiBold,
-                color = DashboardNavy,
-            ),
-        )
-        Spacer(modifier = Modifier.width(8.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(top = 8.dp, bottom = 16.dp),
+        ) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            HeaderIconAction(
-                icon = Icons.Default.Refresh,
-                label = "Actualizar",
-                onClick = onRefresh,
-                enabled = !refrescando,
+            Text(
+                text = "Hola, $nombreSaludo",
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = ComprobanteEmitColors.onPrimary,
+                ),
             )
-            HeaderIconAction(
-                icon = Icons.Default.Menu,
-                label = "Menú",
-            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HeaderIconActionLight(
+                    icon = Icons.Default.Refresh,
+                    label = "Actualizar",
+                    onClick = onRefresh,
+                    enabled = !refrescando,
+                )
+                HeaderIconActionLight(
+                    icon = Icons.Default.Menu,
+                    label = "Menú",
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Resumen de tu negocio",
+            fontSize = 14.sp,
+            color = ComprobanteEmitColors.onPrimary.copy(alpha = 0.9f),
+            fontWeight = FontWeight.Medium,
+        )
         }
     }
 }
 
 @Composable
-private fun HeaderIconAction(
+private fun HeaderIconActionLight(
     icon: ImageVector,
     label: String,
     onClick: (() -> Unit)? = null,
@@ -661,14 +681,22 @@ private fun HeaderIconAction(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (enabled) DashboardNavy else DashboardTextMuted,
+            tint = if (enabled) {
+                ComprobanteEmitColors.onPrimary
+            } else {
+                ComprobanteEmitColors.onPrimary.copy(alpha = 0.45f)
+            },
             modifier = Modifier.size(24.dp),
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = label,
             fontSize = 10.sp,
-            color = if (enabled) DashboardNavy else DashboardTextMuted,
+            color = if (enabled) {
+                ComprobanteEmitColors.onPrimary.copy(alpha = 0.9f)
+            } else {
+                ComprobanteEmitColors.onPrimary.copy(alpha = 0.45f)
+            },
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -686,12 +714,12 @@ private fun ResumenFacturacionCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = DashboardCard),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             ResumenFila(label = "Ventas del mes", valor = ventasMes)
             Spacer(modifier = Modifier.height(12.dp))
             ResumenFila(label = "Por cobrar", valor = pendientes)
@@ -756,7 +784,7 @@ private fun AccionesRapidasRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
         AccionRapida(
@@ -861,7 +889,7 @@ private fun ComprobanteCard(
     detalle: String,
     monto: String,
     etiquetaMonto: String,
-    horizontalPadding: Dp = 20.dp,
+    horizontalPadding: Dp = 16.dp,
     onClick: (() -> Unit)? = null,
 ) {
     Card(
@@ -915,7 +943,7 @@ private fun EmpresaResumenCard(nombreEmpresa: String, ruc: String) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = DashboardCard),
     ) {
@@ -944,107 +972,6 @@ private fun EmpresaResumenCard(nombreEmpresa: String, ruc: String) {
                 tint = DashboardNavy,
             )
         }
-    }
-}
-
-private data class DashboardNavTab(
-    val label: String,
-    val iconOutlined: ImageVector,
-    val iconFilled: ImageVector,
-)
-
-private val dashboardNavTabs = listOf(
-    DashboardNavTab("Inicio", Icons.Outlined.Home, Icons.Default.Home),
-    DashboardNavTab("Emitir", Icons.Outlined.SwapHoriz, Icons.Default.Receipt),
-    DashboardNavTab("Nuevo", Icons.Outlined.AddCircleOutline, Icons.Default.Add),
-    DashboardNavTab("Comprob.", Icons.Outlined.ReceiptLong, Icons.Default.ReceiptLong),
-    DashboardNavTab("Ajustes", Icons.Outlined.Settings, Icons.Default.Settings),
-)
-
-@Composable
-private fun DashboardBottomBar(
-    tabSeleccionado: Int,
-    onTabSelected: (Int) -> Unit,
-    onEmitirClick: () -> Unit,
-    onComprobantesClick: () -> Unit,
-    onConfiguracionClick: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = DashboardCard,
-        shadowElevation = 8.dp,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(top = 10.dp, bottom = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            dashboardNavTabs.forEachIndexed { index, tab ->
-                DashboardBottomNavItem(
-                    tab = tab,
-                    selected = tabSeleccionado == index,
-                    onClick = {
-                        when (index) {
-                            1 -> onEmitirClick()
-                            3 -> onComprobantesClick()
-                            4 -> onConfiguracionClick()
-                            else -> onTabSelected(index)
-                        }
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DashboardBottomNavItem(
-    tab: DashboardNavTab,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .widthIn(min = 56.dp)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 2.dp),
-    ) {
-        if (selected) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(DashboardNavy),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = tab.iconFilled,
-                    contentDescription = tab.label,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
-        } else {
-            Icon(
-                imageVector = tab.iconOutlined,
-                contentDescription = tab.label,
-                tint = DashboardNavy,
-                modifier = Modifier.size(26.dp),
-            )
-        }
-        Spacer(modifier = Modifier.height(6.dp))
-        Text(
-            text = tab.label,
-            fontSize = 11.sp,
-            color = DashboardNavy,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 1,
-        )
     }
 }
 

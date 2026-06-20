@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Lock
@@ -27,13 +28,20 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Print
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SupportAgent
+import androidx.compose.material.icons.filled.Warehouse
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,8 +50,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.modelos.Usuario
-import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
-import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
+import com.factapp.jhonny.modelos.esAdmin
+import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 
 private val C = ComprobanteEmitColors
@@ -53,26 +61,55 @@ fun ConfiguracionScreen(
     modifier: Modifier = Modifier,
     usuario: Usuario? = null,
     onVolver: () -> Unit = {},
+    onCerrarSesion: () -> Unit = {},
 ) {
     BackHandler(onBack = onVolver)
+
+    var confirmarCierre by remember { mutableStateOf(false) }
+    if (confirmarCierre) {
+        AlertDialog(
+            onDismissRequest = { confirmarCierre = false },
+            title = { Text("Cerrar sesión") },
+            text = { Text("Se borrarán los tokens guardados en este dispositivo. ¿Continuar?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmarCierre = false
+                        onCerrarSesion()
+                    },
+                ) {
+                    Text("Cerrar sesión", color = Color(0xFFC62828), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmarCierre = false }) {
+                    Text("Cancelar")
+                }
+            },
+        )
+    }
 
     val company = usuario?.company
     val nombreEmpresa = company?.nombre ?: "Empresa no vinculada"
     val ruc = company?.ruc ?: "Sin RUC"
     val email = usuario?.email ?: "Sin usuario"
+    val almacenAsignado = remember(usuario) {
+        val nombre = usuario?.almacenNombre?.takeIf { it.isNotBlank() }
+        val id = usuario?.almacenId?.takeIf { it.isNotBlank() }
+        when {
+            nombre != null -> nombre
+            id != null -> id
+            usuario?.esAdmin() == true -> "Sin asignar (administrador)"
+            else -> "Sin almacén asignado"
+        }
+    }
 
-    Scaffold(
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Configuración",
-                subtitulo = "Preferencias y datos de tu empresa",
-                icono = Icons.Default.Settings,
-                onVolver = onVolver,
-            )
-        },
+        titulo = "Configuración",
+        subtitulo = "Preferencias y datos de tu empresa",
+        icono = Icons.Default.Settings,
+        onVolver = onVolver,
     ) { padding ->
         Column(
             modifier = Modifier
@@ -86,6 +123,7 @@ fun ConfiguracionScreen(
                 nombreEmpresa = nombreEmpresa,
                 ruc = ruc,
                 email = email,
+                almacenAsignado = almacenAsignado,
             )
 
             Spacer(Modifier.height(18.dp))
@@ -138,7 +176,7 @@ fun ConfiguracionScreen(
             ConfiguracionMenuItem(
                 icono = Icons.Default.Code,
                 titulo = "Datos del desarrollador",
-                detalle = "FactApp Mobile · Versión demo · Contacto de soporte",
+                detalle = "FactApp Mobile · Soporte técnico",
                 color = Color(0xFF6A1B9A),
             )
 
@@ -157,6 +195,21 @@ fun ConfiguracionScreen(
                 detalle = email,
                 color = C.textSecondary,
             )
+            Spacer(Modifier.height(10.dp))
+            ConfiguracionMenuItem(
+                icono = Icons.Default.Warehouse,
+                titulo = "Almacén asignado",
+                detalle = almacenAsignado,
+                color = Color(0xFF00838F),
+            )
+            Spacer(Modifier.height(10.dp))
+            ConfiguracionMenuItem(
+                icono = Icons.AutoMirrored.Filled.Logout,
+                titulo = "Cerrar sesión",
+                detalle = "Salir de la cuenta en este dispositivo",
+                color = Color(0xFFC62828),
+                onClick = { confirmarCierre = true },
+            )
         }
     }
 }
@@ -166,6 +219,7 @@ private fun ConfiguracionEmpresaCard(
     nombreEmpresa: String,
     ruc: String,
     email: String,
+    almacenAsignado: String,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -212,6 +266,40 @@ private fun ConfiguracionEmpresaCard(
                     Text("Sesión iniciada", fontSize = 11.sp, color = C.textSecondary, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(3.dp))
                     Text(email, fontSize = 14.sp, color = C.textPrimary, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                color = C.surfaceSoft,
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.Warehouse,
+                        contentDescription = null,
+                        tint = Color(0xFF00838F),
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            "Almacén asignado",
+                            fontSize = 11.sp,
+                            color = C.textSecondary,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            almacenAsignado,
+                            fontSize = 14.sp,
+                            color = C.textPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
         }

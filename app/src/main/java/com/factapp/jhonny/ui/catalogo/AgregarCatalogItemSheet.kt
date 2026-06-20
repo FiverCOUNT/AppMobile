@@ -61,6 +61,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.factapp.jhonny.network.dto.unidadPermiteSerie
 import com.factapp.jhonny.network.dto.model.CatalogItem
 import com.factapp.jhonny.network.dto.model.CatalogItemKind
 import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
@@ -114,6 +115,13 @@ fun AgregarCatalogItemSheet(
             unidadSeleccionada = opciones.first().codigo
         }
     }
+    LaunchedEffect(unidadSeleccionada) {
+        if (!unidadPermiteSerie(unidadSeleccionada)) {
+            manejaSerie = false
+        }
+    }
+
+    val puedeUsarSerie = esProducto && unidadPermiteSerie(unidadSeleccionada)
 
     val scrollState = rememberScrollState()
 
@@ -211,7 +219,7 @@ fun AgregarCatalogItemSheet(
                             seleccionada = unidadSeleccionada,
                             onSeleccionar = { unidadSeleccionada = it },
                         )
-                        if (esProducto) {
+                        if (puedeUsarSerie) {
                             Spacer(modifier = Modifier.height(14.dp))
                             NuevoItemSeccionTitulo("Número de serie")
                             Spacer(modifier = Modifier.height(8.dp))
@@ -229,6 +237,7 @@ fun AgregarCatalogItemSheet(
                     texto = when {
                         !esProducto -> "Los servicios no requieren inventario ni salidas de stock."
                         manejaSerie -> "Cada unidad tendrá un número de serie. El stock será la cantidad de series disponibles."
+                        !puedeUsarSerie -> "Metro, kilo y litro se controlan por cantidad; no usan número de serie."
                         else -> "El stock se actualizará al registrar salidas de mercadería."
                     },
                 )
@@ -259,6 +268,7 @@ fun AgregarCatalogItemSheet(
                         onClick = {
                             val kind = if (esProducto) CatalogItemKind.PRODUCT else CatalogItemKind.SERVICE
                             val precio = parsePrecioTexto(precioTexto)
+                            val usaSerie = esProducto && manejaSerie && unidadPermiteSerie(unidadSeleccionada)
                             val item = if (itemExistente != null) {
                                 itemExistente.copy(
                                     kind = kind.name,
@@ -266,7 +276,7 @@ fun AgregarCatalogItemSheet(
                                     precioUnitario = precio,
                                     unidad = unidadSeleccionada,
                                     manejaStock = esProducto,
-                                    manejaSerie = esProducto && manejaSerie,
+                                    manejaSerie = usaSerie,
                                     stockActual = if (esProducto) itemExistente.stockActual else null,
                                     duracionMinutos = if (!esProducto) {
                                         itemExistente.duracionMinutos ?: 60
@@ -284,7 +294,7 @@ fun AgregarCatalogItemSheet(
                                     precioUnitario = precio,
                                     activo = true,
                                     manejaStock = esProducto,
-                                    manejaSerie = esProducto && manejaSerie,
+                                    manejaSerie = usaSerie,
                                     stockActual = null,
                                     duracionMinutos = if (!esProducto) 60 else null,
                                 )
@@ -334,9 +344,9 @@ private data class UnidadUi(
 
 private val UNIDADES_PRODUCTO = listOf(
     UnidadUi("NIU", "Unidad"),
-    UnidadUi("MTR", "MTR"),
+    UnidadUi("MTR", "Metro"),
     UnidadUi("KGM", "Kg"),
-    UnidadUi("LTR", "LI"),
+    UnidadUi("LTR", "Litro"),
 )
 
 private val UNIDADES_SERVICIO = listOf(

@@ -25,9 +25,21 @@ fun ComprobanteEstado.etiqueta(): String = when (this) {
     ComprobanteEstado.ANULADO -> "Anulado"
 }
 
-fun Invoice.tienePdf(): Boolean = !pdfUrl.isNullOrBlank()
+fun Invoice.tienePdf(): Boolean {
+    if (!pdfUrl.isNullOrBlank()) return true
+    return id.isNotBlank() && estado != ComprobanteEstado.BORRADOR
+}
+
+fun Invoice.puedeReenviar(): Boolean =
+    puedeReenviar == true || estado == ComprobanteEstado.RECHAZADO
+
+fun Invoice.motivoRechazoSunat(): String? =
+    sunatDescripcion?.takeIf { it.isNotBlank() }
+        ?: message?.takeIf { it.isNotBlank() }
 
 fun Invoice.tieneCdrZip(): Boolean = !cdrZipUrl.isNullOrBlank()
+
+fun Invoice.tieneXml(): Boolean = !xmlUrl.isNullOrBlank()
 
 fun ComprobanteEstado.colorArgb(): Long = when (this) {
     ComprobanteEstado.ACEPTADO -> 0xFF2E7D32

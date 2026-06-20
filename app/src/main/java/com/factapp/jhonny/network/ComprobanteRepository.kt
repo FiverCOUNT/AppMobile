@@ -1,9 +1,6 @@
 package com.factapp.jhonny.network
 
-import com.factapp.jhonny.network.dto.demo.ComprasDemo
-import com.factapp.jhonny.network.dto.demo.ComprobantesEmitidosDemo
-import com.factapp.jhonny.network.dto.filtrarPorRango
-import com.factapp.jhonny.network.dto.model.ComprobanteEstado
+import com.factapp.jhonny.network.dto.ordenadosPorFechaEmisionReciente
 import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest
 import java.time.LocalDate
@@ -14,27 +11,16 @@ object ComprobanteRepository {
         companyRuc: String,
         token: String?,
         body: EmitirComprobanteRequest,
-    ): Result<Invoice> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Sin empresa vinculada"))
-        }
-        if (!token.isNullOrBlank()) {
-            runCatching {
-                RetrofitClient.api.guardarComprobante(companyRuc, bearer(token), body)
-            }.onSuccess { return Result.success(it.normalizado()) }
-        }
-        return Result.success(
-            Invoice(
-                id = "demo-emit-${System.currentTimeMillis()}",
-                companyRuc = companyRuc,
-                tipoDoc = body.tipo,
-                serie = "DEMO",
-                correlativo = "00001",
-                client = body.receptor,
-                details = emptyList(),
-                estado = ComprobanteEstado.ENVIADO,
-            ),
-        )
+    ): Result<Invoice> = apiCall(companyRuc, token, "emitir comprobantes") { authToken ->
+        RetrofitClient.api.guardarComprobante(companyRuc, bearer(authToken), body).normalizado()
+    }
+
+    suspend fun reenviar(
+        companyRuc: String,
+        token: String?,
+        comprobanteId: String,
+    ): Result<Invoice> = apiCall(companyRuc, token, "reenviar comprobante") { authToken ->
+        RetrofitClient.api.reenviarComprobante(companyRuc, comprobanteId, bearer(authToken)).normalizado()
     }
 
     suspend fun listarEmitidos(
@@ -42,45 +28,62 @@ object ComprobanteRepository {
         token: String?,
         desde: LocalDate? = null,
         hasta: LocalDate? = null,
-    ): Result<List<Invoice>> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Sin empresa vinculada"))
-        }
-        val desdeStr = desde?.toString()
-        val hastaStr = hasta?.toString()
-        if (!token.isNullOrBlank()) {
-            runCatching {
-                RetrofitClient.api.listarComprobantesEmitidos(
-                    companyRuc,
-                    bearer(token),
-                    desdeStr,
-                    hastaStr,
-                )
-            }.onSuccess { remoto ->
-                if (remoto.isNotEmpty()) return Result.success(remoto.map { it.normalizado() })
-            }
-        }
-        val demo = ComprobantesEmitidosDemo.listar(companyRuc)
-        return Result.success(
-            if (desde != null && hasta != null) demo.filtrarPorRango(desde, hasta) else demo,
-        )
+    ): Result<List<Invoice>> = apiCall(companyRuc, token, "consultar comprobantes emitidos") { authToken ->
+        RetrofitClient.api.listarComprobantesEmitidos(
+            companyRuc,
+            bearer(authToken),
+            desde?.toString(),
+            hasta?.toString(),
+        ).map { it.normalizado() }.ordenadosPorFechaEmisionReciente()
     }
 
     suspend fun listarCompras(
         companyRuc: String,
         token: String?,
-    ): Result<List<Invoice>> {
+    ): Result<List<Invoice>> = apiCall(companyRuc, token, "consultar compras") { authToken ->
+        RetrofitClient.api.listarCompras(companyRuc, bearer(authToken))
+            .map { it.normalizado() }
+            .ordenadosPorFechaEmisionReciente()
+    }
+
+    suspend fun descargarArchivo(
+        companyRuc: String,
+        token: String?,
+        comprobanteId: String,
+        tipo: String,
+        formatoPdf: PdfFormato? = null,
+    ): Result<ByteArray> = apiCall(companyRuc, token, "descargar $tipo del comprobante") { authToken ->
+        RetrofitClient.api.descargarArchivoComprobante(
+            companyRuc,
+            comprobanteId,
+            tipo,
+            bearer(authToken),
+            formato = formatoPdf?.query,
+        ).use { body -> body.bytes() }
+    }
+
+    enum class PdfFormato(val query: String) {
+        A4("a4"),
+        TICKET("ticket"),
+    }
+
+    private suspend fun <T> apiCall(
+        companyRuc: String,
+        token: String?,
+        accion: String,
+        block: suspend (String) -> T,
+    ): Result<T> {
         if (companyRuc.isBlank()) {
             return Result.failure(IllegalArgumentException("Sin empresa vinculada"))
         }
-        if (!token.isNullOrBlank()) {
-            runCatching {
-                RetrofitClient.api.listarCompras(companyRuc, bearer(token))
-            }.onSuccess { remoto ->
-                if (remoto.isNotEmpty()) return Result.success(remoto.map { it.normalizado() })
-            }
+        if (token.isNullOrBlank()) {
+            return Result.failure(IllegalStateException("Inicia sesión para $accion"))
         }
-        return Result.success(ComprasDemo.listar(companyRuc))
+        return try {
+            Result.success(block(token))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     private fun bearer(token: String) = "Bearer $token"

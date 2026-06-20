@@ -42,19 +42,18 @@ fun ComprobanteEmitHeader(
     onVolver: (() -> Unit)? = null,
     mostrarDragHandle: Boolean = false,
 ) {
-    val barColor = C.topBar
-    ApplyAppTopBarColor(barColor)
+    ApplyAppTopBarColor(C.topBar)
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(barColor),
+            .background(C.topBar),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(bottom = 20.dp),
+                .padding(bottom = 16.dp),
         ) {
             if (mostrarDragHandle) {
                 Box(
@@ -72,8 +71,8 @@ fun ComprobanteEmitHeader(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(
-                        start = if (onVolver == null) 20.dp else 4.dp,
-                        end = 20.dp,
+                        start = if (onVolver == null) 16.dp else 4.dp,
+                        end = 16.dp,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -90,13 +89,13 @@ fun ComprobanteEmitHeader(
                     Surface(
                         modifier = Modifier.size(44.dp),
                         shape = CircleShape,
-                        color = C.accentBright.copy(alpha = 0.22f),
+                        color = C.onPrimary.copy(alpha = 0.18f),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = icono,
                                 contentDescription = null,
-                                tint = C.accentBright,
+                                tint = C.onPrimary,
                                 modifier = Modifier.size(24.dp),
                             )
                         }
@@ -118,6 +117,7 @@ fun ComprobanteEmitHeader(
                             fontSize = 14.sp,
                             color = C.onPrimary.copy(alpha = 0.9f),
                             fontWeight = FontWeight.Medium,
+                            lineHeight = 18.sp,
                         )
                     }
                 }
@@ -125,9 +125,9 @@ fun ComprobanteEmitHeader(
             detalle?.let {
                 Text(
                     text = it,
-                    modifier = Modifier.padding(horizontal = 20.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     fontSize = 13.sp,
-                    color = C.onPrimary.copy(alpha = 0.78f),
+                    color = C.onPrimary.copy(alpha = 0.85f),
                     lineHeight = 18.sp,
                 )
             }

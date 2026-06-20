@@ -9,6 +9,7 @@ import com.factapp.jhonny.network.dto.request.CrearCatalogItemRequest
 import com.factapp.jhonny.network.dto.request.CrearClienteRequest
 import com.factapp.jhonny.network.dto.request.PatchCatalogItemRequest
 import com.factapp.jhonny.network.dto.model.InventarioSaldo
+import com.factapp.jhonny.network.dto.model.UbicacionProducto
 import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.model.Movimiento
 import com.factapp.jhonny.network.dto.request.RegistrarSalidaRequest
@@ -17,8 +18,9 @@ import com.factapp.jhonny.network.dto.model.UsuarioSesionApi
 import com.factapp.jhonny.network.dto.request.LoginApiRequest
 import com.factapp.jhonny.network.dto.request.RefreshTokenRequest
 import com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest
+import com.factapp.jhonny.network.dto.model.ProductoDevolucionCliente
 import com.factapp.jhonny.network.dto.model.ProductoSerie
-import com.factapp.jhonny.network.dto.request.RegistrarEntradaRequest
+import com.factapp.jhonny.network.dto.request.RegistrarEntradaApiBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
@@ -28,6 +30,8 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
+import okhttp3.ResponseBody
 
 interface ApiService {
 
@@ -36,6 +40,10 @@ interface ApiService {
 
     @POST("auth/refresh")
     suspend fun refresh(@Body body: RefreshTokenRequest): ApiEnvelope<UsuarioSesionApi>
+
+    /** Perfil y configuración actual (empresa, series, almacenes). */
+    @GET("auth/me")
+    suspend fun me(@Header("Authorization") authorization: String): ApiEnvelope<UsuarioSesionApi>
 
     /** Catálogo de productos/servicios de la empresa (origen: servidor). */
     /** Clientes de la empresa emisora (personas y empresas receptoras). */
@@ -106,6 +114,23 @@ interface ApiService {
         @Query("hasta") hasta: String? = null,
     ): List<Invoice>
 
+    @POST("empresas/{ruc}/comprobantes/{id}/emitir")
+    suspend fun reenviarComprobante(
+        @Path("ruc") ruc: String,
+        @Path("id") id: String,
+        @Header("Authorization") authorization: String,
+    ): Invoice
+
+    @Streaming
+    @GET("empresas/{ruc}/comprobantes/{id}/archivos/{tipo}")
+    suspend fun descargarArchivoComprobante(
+        @Path("ruc") ruc: String,
+        @Path("id") id: String,
+        @Path("tipo") tipo: String,
+        @Header("Authorization") authorization: String,
+        @Query("formato") formato: String? = null,
+    ): ResponseBody
+
     /** Facturas de compra registradas (comprobantes de proveedores). */
     @GET("empresas/{ruc}/compras")
     suspend fun listarCompras(
@@ -118,6 +143,8 @@ interface ApiService {
         @Path("ruc") ruc: String,
         @Header("Authorization") authorization: String,
         @Query("solo_activos") soloActivos: Boolean? = null,
+        /** Usuario no admin: devuelve todos los almacenes de la empresa (p. ej. destino de traslado). */
+        @Query("todos") todos: Boolean? = null,
     ): List<Almacen>
 
     @POST("empresas/{ruc}/almacenes")
@@ -136,6 +163,21 @@ interface ApiService {
     ): List<ProductoSerie>
 
     /** Saldos de inventario por producto y almacén (`inventarioApiController.list`). */
+    @GET("empresas/{ruc}/inventario/devoluciones")
+    suspend fun listarProductosDevolucion(
+        @Path("ruc") ruc: String,
+        @Header("Authorization") authorization: String,
+        @Query("cliente_id") clienteId: String,
+    ): List<ProductoDevolucionCliente>
+
+    @GET("empresas/{ruc}/inventario/ubicaciones")
+    suspend fun buscarUbicaciones(
+        @Path("ruc") ruc: String,
+        @Header("Authorization") authorization: String,
+        @Query("q") query: String,
+        @Query("modo") modo: String,
+    ): List<UbicacionProducto>
+
     @GET("empresas/{ruc}/inventario")
     suspend fun listarInventario(
         @Path("ruc") ruc: String,
@@ -156,7 +198,7 @@ interface ApiService {
     suspend fun registrarEntrada(
         @Path("ruc") ruc: String,
         @Header("Authorization") authorization: String,
-        @Body body: RegistrarEntradaRequest,
+        @Body body: RegistrarEntradaApiBody,
     ): Movimiento
 
     @GET("empresas/{ruc}/inventario/movimientos")
@@ -164,6 +206,7 @@ interface ApiService {
         @Path("ruc") ruc: String,
         @Header("Authorization") authorization: String,
         @Query("tipo") tipo: String? = null,
+        @Query("cliente_id") clienteId: String? = null,
     ): List<Movimiento>
 
     /** Salidas / entregas ([Movimiento] tipo SALIDA). Misma ruta legacy `/entregas`. */

@@ -19,6 +19,7 @@ import com.factapp.jhonny.network.dto.model.Almacen
 import com.factapp.jhonny.network.dto.model.CatalogItem
 import com.factapp.jhonny.network.dto.model.Movimiento
 import com.factapp.jhonny.network.dto.model.etiquetaDestino
+import com.factapp.jhonny.network.dto.model.fechaHoraCompacto
 import com.factapp.jhonny.network.dto.formatCantidadConUnidad
 import com.factapp.jhonny.network.dto.model.resumenSeries
 import java.io.File
@@ -64,14 +65,13 @@ object SalidaPrintHelper {
             val writer = SalidaPdfWriter(document)
             writer.header("CONSTANCIA DE SALIDA", salida.numeroDisplay)
 
-            val fecha = salida.fechaDespacho ?: salida.fecha
             val origen = almacenes[salida.almacenId]?.nombre ?: salida.almacenId
             val destino = salida.etiquetaDestino(almacenes) ?: "Sin destino"
             val cliente = salida.cliente
 
             writer.section("Datos de la salida")
             writer.keyValue("Numero", salida.numeroDisplay)
-            writer.keyValue("Fecha", fecha.take(16).replace('T', ' '))
+            writer.keyValue("Fecha", salida.fechaHoraCompacto())
             writer.keyValue("Estado", salida.estado?.name ?: "Sin estado")
             writer.keyValue("Origen", origen)
             writer.keyValue("Destino", destino)

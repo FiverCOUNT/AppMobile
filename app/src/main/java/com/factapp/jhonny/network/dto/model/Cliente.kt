@@ -21,6 +21,10 @@ data class Cliente(
     val esPersonaNatural: Boolean
         get() = tipoDoc == TIPO_DOC_DNI
 
+    /** Cliente con RUC (persona jurídica) — no aplica en boletas. */
+    val esEmpresa: Boolean
+        get() = tipoDoc == TIPO_DOC_RUC
+
     val etiquetaDocumento: String
         get() = when (tipoDoc) {
             TIPO_DOC_DNI -> "DNI $numeroDoc"
@@ -43,3 +47,6 @@ fun Cliente.aMovimientoCliente(): MovimientoCliente = MovimientoCliente(
 
 fun dniValido(numero: String): Boolean =
     numero.length == 8 && numero.all { it.isDigit() }
+
+/** Clientes válidos como receptor de boleta (sin RUC / empresa). */
+fun List<Cliente>.aptosParaBoleta(): List<Cliente> = filter { !it.esEmpresa }

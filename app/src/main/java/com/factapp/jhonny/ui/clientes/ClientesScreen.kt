@@ -22,11 +22,14 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -51,8 +54,7 @@ import com.factapp.jhonny.network.dto.model.lineaPrincipal
 import com.factapp.jhonny.network.dto.request.CrearClienteRequest
 import com.factapp.jhonny.network.dto.companyRucParaCatalogo
 import com.factapp.jhonny.ui.catalogo.CatalogoBusquedaBar
-import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
-import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
+import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -77,6 +79,10 @@ fun ClientesScreen(
     modifier: Modifier = Modifier,
     usuario: Usuario? = null,
     onVolver: () -> Unit = {},
+    onVerCliente: (Cliente) -> Unit = {},
+    abrirAgregarInicial: Boolean = false,
+    onAgregarInicialConsumido: () -> Unit = {},
+    onClienteCreado: ((Cliente) -> Unit)? = null,
 ) {
     BackHandler(onBack = onVolver)
 
@@ -88,7 +94,6 @@ fun ClientesScreen(
     var cargando by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var busqueda by remember { mutableStateOf("") }
-    var clienteContacto by remember { mutableStateOf<Cliente?>(null) }
     var mostrarAgregar by remember { mutableStateOf(false) }
     var guardandoCliente by remember { mutableStateOf(false) }
     var errorAgregar by remember { mutableStateOf<String?>(null) }
@@ -112,6 +117,14 @@ fun ClientesScreen(
         cargando = false
     }
 
+    LaunchedEffect(abrirAgregarInicial) {
+        if (abrirAgregarInicial) {
+            errorAgregar = null
+            mostrarAgregar = true
+            onAgregarInicialConsumido()
+        }
+    }
+
     val filtrados by remember(clientes, busqueda) {
         derivedStateOf { clientes.filtrarPorBusqueda(busqueda) }
     }
@@ -126,18 +139,12 @@ fun ClientesScreen(
         }
     }
 
-    Scaffold(
+    AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Clientes",
-                subtitulo = subtituloHeader,
-                icono = Icons.Default.People,
-                onVolver = onVolver,
-            )
-        },
+        titulo = "Clientes",
+        subtitulo = subtituloHeader,
+        icono = Icons.Default.People,
+        onVolver = onVolver,
         floatingActionButton = {
             if (!cargando && error == null) {
                 FloatingActionButton(
@@ -183,10 +190,31 @@ fun ClientesScreen(
                                 CatalogoBusquedaBar(
                                     value = busqueda,
                                     onValueChange = { busqueda = it },
+                                    totalItems = clientes.size,
+                                    resultados = filtrados.size,
+                                    placeholder = "Buscar por nombre, DNI, teléfono…",
                                 )
+                                Spacer(Modifier.height(10.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        errorAgregar = null
+                                        mostrarAgregar = true
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    border = BorderStroke(1.5.dp, C.accent),
+                                ) {
+                                    Icon(Icons.Default.PersonAdd, contentDescription = null, tint = C.accent)
+                                    Spacer(Modifier.size(8.dp))
+                                    Text(
+                                        "Agregar cliente manualmente",
+                                        color = C.accent,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
                                 Spacer(Modifier.height(8.dp))
                                 Text(
-                                    "Puedes registrar clientes con DNI. Los RUC se crean al facturar.",
+                                    "Registra personas con DNI. Los RUC se crean al facturar.",
                                     fontSize = 12.sp,
                                     color = C.textSecondary,
                                     lineHeight = 16.sp,
@@ -215,7 +243,7 @@ fun ClientesScreen(
                                 ClienteCard(
                                     cliente = cliente,
                                     modifier = Modifier.padding(horizontal = 16.dp),
-                                    onClick = { clienteContacto = cliente },
+                                    onClick = { onVerCliente(cliente) },
                                 )
                             }
                         }
@@ -225,11 +253,6 @@ fun ClientesScreen(
             }
         }
     }
-
-    ClienteContactoSheet(
-        cliente = clienteContacto,
-        onDismiss = { clienteContacto = null },
-    )
 
     AgregarClienteSheet(
         visible = mostrarAgregar,
@@ -249,10 +272,11 @@ fun ClientesScreen(
                     ClienteRepository.crear(companyRuc, token, body)
                 }
                 guardandoCliente = false
-                result.onSuccess {
+                result.onSuccess { cli ->
                     mostrarAgregar = false
                     errorAgregar = null
                     withContext(Dispatchers.IO) { recargar() }
+                    onClienteCreado?.invoke(cli) ?: Unit
                 }.onFailure {
                     errorAgregar = it.message ?: "No se pudo registrar el cliente"
                 }
@@ -333,7 +357,7 @@ private fun ClienteCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Contactar",
+                    text = "Ver entregas",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = C.accent,

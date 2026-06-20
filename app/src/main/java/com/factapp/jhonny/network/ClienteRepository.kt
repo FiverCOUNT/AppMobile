@@ -1,28 +1,17 @@
 package com.factapp.jhonny.network
 
 import com.factapp.jhonny.network.dto.model.Cliente
-import com.factapp.jhonny.network.dto.demo.ClientesDemo
-import com.factapp.jhonny.network.dto.request.CrearClienteRequest
 import com.factapp.jhonny.network.dto.model.TIPO_DOC_DNI
 import com.factapp.jhonny.network.dto.model.dniValido
+import com.factapp.jhonny.network.dto.request.CrearClienteRequest
 
 object ClienteRepository {
 
     suspend fun listar(
         companyRuc: String,
         token: String?,
-    ): Result<List<Cliente>> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
-        }
-        if (!token.isNullOrBlank()) {
-            runCatching {
-                RetrofitClient.api.listarClientes(companyRuc, bearer(token))
-            }.onSuccess { remoto ->
-                if (remoto.isNotEmpty()) return Result.success(remoto)
-            }
-        }
-        return Result.success(ClientesDemo.listar(companyRuc))
+    ): Result<List<Cliente>> = apiCall(companyRuc, token, "consultar clientes") { authToken ->
+        RetrofitClient.api.listarClientes(companyRuc, bearer(authToken))
     }
 
     suspend fun crear(
@@ -30,9 +19,6 @@ object ClienteRepository {
         token: String?,
         body: CrearClienteRequest,
     ): Result<Cliente> {
-        if (companyRuc.isBlank()) {
-            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
-        }
         if (body.tipoDoc != TIPO_DOC_DNI) {
             return Result.failure(
                 IllegalArgumentException("Solo puedes registrar clientes con DNI desde la app"),
@@ -44,16 +30,27 @@ object ClienteRepository {
         if (body.razonSocial.isBlank()) {
             return Result.failure(IllegalArgumentException("El nombre es obligatorio"))
         }
+        return apiCall(companyRuc, token, "crear clientes") { authToken ->
+            RetrofitClient.api.crearCliente(companyRuc, bearer(authToken), body)
+        }
+    }
 
+    private suspend fun <T> apiCall(
+        companyRuc: String,
+        token: String?,
+        accion: String,
+        block: suspend (String) -> T,
+    ): Result<T> {
+        if (companyRuc.isBlank()) {
+            return Result.failure(IllegalArgumentException("Empresa sin RUC"))
+        }
         if (token.isNullOrBlank()) {
-            return runCatching { ClientesDemo.crear(companyRuc, body) }
+            return Result.failure(IllegalStateException("Inicia sesión para $accion"))
         }
         return try {
-            Result.success(
-                RetrofitClient.api.crearCliente(companyRuc, bearer(token), body),
-            )
-        } catch (_: Exception) {
-            runCatching { ClientesDemo.crear(companyRuc, body) }
+            Result.success(block(token))
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

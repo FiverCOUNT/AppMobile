@@ -1,11 +1,18 @@
 package com.factapp.jhonny.network.dto.model
 
+import com.factapp.jhonny.network.dto.cantidadMaximaEnEmision
+import com.factapp.jhonny.network.dto.coerceCantidadParaEmision
+import com.factapp.jhonny.network.dto.debeValidarStockEnEmision
 import com.factapp.jhonny.network.dto.hayStockPara
+import com.factapp.jhonny.network.dto.hayStockParaEmision
 import com.factapp.jhonny.network.dto.manejaInventario
+import com.factapp.jhonny.network.dto.unidadPermiteSerie
+import com.factapp.jhonny.network.dto.usaSeriesInventario
 import com.factapp.jhonny.network.dto.request.EmitirLineaRequest
 import com.factapp.jhonny.network.dto.request.RegistrarMovimientoLineaRequest
 import com.google.gson.annotations.SerializedName
 import java.util.UUID
+import kotlin.math.round
 import kotlin.math.roundToInt
 
 /**
@@ -16,11 +23,12 @@ import kotlin.math.roundToInt
  * es opcional ([catalogItem]) solo para UI en pantalla.
  */
 data class LineaCatalogoItem(
+    @SerializedName("linea_id")
     val lineaId: String = UUID.randomUUID().toString(),
     @SerializedName("id")
     val id: String? = null,
     @SerializedName("catalog_item_id")
-    val catalogItemId: String,
+    val catalogItemId: String = "",
     /** Snapshot — nombre al momento de la operación. */
     val nombre: String? = null,
     val codigo: String? = null,
@@ -28,6 +36,12 @@ data class LineaCatalogoItem(
     val unidad: String? = null,
     @SerializedName("precio_unitario")
     val precioUnitario: Double? = null,
+    /** Precio unitario de la factura original (solo NC en pantalla). */
+    @SerializedName("precio_original_referencia")
+    val precioOriginalReferencia: Double? = null,
+    /** Cantidad máxima acreditable según la factura original (solo NC en pantalla). */
+    @SerializedName("cantidad_original_referencia")
+    val cantidadOriginalReferencia: Double? = null,
     @SerializedName("afectacion_igv")
     val afectacionIgv: String? = null,
     val kind: String? = null,
@@ -35,25 +49,30 @@ data class LineaCatalogoItem(
     val manejaStock: Boolean? = null,
     @SerializedName("maneja_serie")
     val manejaSerie: Boolean? = null,
-    val cantidad: Double,
+    val cantidad: Double = 0.0,
     @SerializedName("almacen_id")
     val almacenId: String? = null,
     @SerializedName(value = "producto_serie", alternate = ["serie"])
     val productoSerie: ProductoSerie? = null,
     @SerializedName("series")
-    internal val numerosSerieApi: List<String>? = null,
+    val numerosSerieApi: List<String>? = null,
+    @SerializedName(value = "numeros_serie", alternate = ["numerosSerie"])
+    val numerosSerie: List<String> = emptyList(),
     @SerializedName("serie_ids")
     val serieIds: List<String>? = null,
+    /** Series en memoria (UI); el API envía strings en [numerosSerieApi]. */
+    @SerializedName("series_ui")
     val series: List<ProductoSerie> = emptyList(),
-    val numerosSerie: List<String> = emptyList(),
-    /** Referencia viva al catálogo (solo pantalla; no suele venir del API). */
+    /** Referencia viva al catálogo (solo pantalla; no viene del API). */
+    @SerializedName("catalog_item_ui")
     val catalogItem: CatalogItem? = null,
 ) {
     val nombreEfectivo: String
         get() = nombre?.takeIf { it.isNotBlank() }
             ?: descripcion?.takeIf { it.isNotBlank() }
             ?: catalogItem?.nombre
-            ?: catalogItemId
+            ?: catalogItemId.takeIf { it.isNotBlank() }
+            ?: "Producto"
 
     val unidadEfectiva: String
         get() = unidad ?: catalogItem?.unidad ?: "NIU"
@@ -75,14 +94,24 @@ data class LineaCatalogoItem(
             else -> kind?.uppercase() == CatalogItemKind.PRODUCT.name && manejaStock == true
         }
 
+    /** Precio de catálogo incluye IGV (afectación 10). Base imponible por unidad. */
+    val valorUnitarioSinIgv: Double
+        get() = if (afectacionIgvEfectiva == "10") {
+            round4(precioUnitarioEfectivo / (1 + IGV_RATE))
+        } else {
+            precioUnitarioEfectivo
+        }
+
+    /** Base imponible de la línea (sin IGV). */
     val subtotal: Double
-        get() = precioUnitarioEfectivo * cantidad
+        get() = round4(valorUnitarioSinIgv * cantidad)
 
     val igv: Double
-        get() = if (afectacionIgvEfectiva == "10") subtotal * IGV_RATE else 0.0
+        get() = if (afectacionIgvEfectiva == "10") round4(subtotal * IGV_RATE) else 0.0
 
+    /** Total con IGV — coincide con precioUnitario × cantidad en afectación 10. */
     val total: Double
-        get() = subtotal + igv
+        get() = round4(subtotal + igv)
 
     val numerosSerieUi: List<String>
         get() = when {
@@ -220,11 +249,17 @@ typealias LineaCatalogo = LineaCatalogoItem
 
 private const val IGV_RATE = 0.18
 
+private fun round4(value: Double): Double = round(value * 10000.0) / 10000.0
+
 fun LineaCatalogoItem.requireItem(): CatalogItem =
     requireNotNull(catalogItem) { "catalogItem requerido en esta operación" }
 
+fun LineaCatalogoItem.itemParaEmision(catalogo: List<CatalogItem>): CatalogItem =
+    catalogo.find { it.id == catalogItemId } ?: requireItem()
+
 val LineaCatalogoItem.requiereSeries: Boolean
-    get() = manejaSerieEfectivo
+    get() = catalogItem?.usaSeriesInventario
+        ?: (manejaSerieEfectivo && unidadPermiteSerie(unidadEfectiva))
 
 fun LineaCatalogoItem.seriesValidas(): Boolean {
     if (!requiereSeries) return true
@@ -252,17 +287,21 @@ fun LineaCatalogoItem.listaParaEmitir(): Boolean {
     val item = catalogItem
     if (item != null) {
         return cantidad > 0 &&
-            (!item.manejaInventario || item.hayStockPara(cantidad)) &&
+            (!item.debeValidarStockEnEmision() || item.hayStockParaEmision(cantidad)) &&
             seriesValidas()
     }
     return cantidad > 0 && seriesValidas()
 }
 
+/** Notas de crédito/débito: no exigen stock de almacén ni series de inventario. */
+fun LineaCatalogoItem.listaParaEmitirNotaFiscal(): Boolean = cantidad > 0
+
 fun List<LineaCatalogoItem>.agregarDesdeCatalogo(
     item: CatalogItem,
     almacenId: String? = null,
 ): List<LineaCatalogoItem> {
-    if (item.manejaSerie) {
+    if (item.usaSeriesInventario) {
+        if (item.debeValidarStockEnEmision() && !item.hayStockParaEmision(1.0)) return this
         return this + item.aLineaCatalogoItem(
             cantidad = 1.0,
             almacenId = almacenId,
@@ -271,32 +310,65 @@ fun List<LineaCatalogoItem>.agregarDesdeCatalogo(
     }
     val existente = find { it.catalogItemId == item.id && it.almacenId == almacenId }
     return if (existente != null) {
+        val nuevaCantidad = existente.cantidad + 1.0
+        if (item.debeValidarStockEnEmision() && !item.hayStockParaEmision(nuevaCantidad)) return this
         map { linea ->
             if (linea.lineaId == existente.lineaId) {
-                linea.copy(cantidad = linea.cantidad + 1.0)
+                linea.copy(cantidad = nuevaCantidad)
             } else {
                 linea
             }
         }
     } else {
+        if (item.debeValidarStockEnEmision() && !item.hayStockParaEmision(1.0)) return this
         this + item.aLineaCatalogoItem(cantidad = 1.0, almacenId = almacenId)
     }
 }
+
+fun List<LineaCatalogoItem>.agregarDesdeCatalogoSiHayStock(
+    item: CatalogItem,
+    almacenId: String? = null,
+): Pair<List<LineaCatalogoItem>, Boolean> {
+    val cantidadAntes = find { it.catalogItemId == item.id && it.almacenId == almacenId }?.cantidad ?: 0.0
+    val despues = agregarDesdeCatalogo(item, almacenId)
+    val cantidadDespues = despues.find { it.catalogItemId == item.id && it.almacenId == almacenId }?.cantidad ?: 0.0
+    return despues to (cantidadDespues > cantidadAntes)
+}
+
+fun List<LineaCatalogoItem>.actualizarPrecioAcreditar(
+    lineaId: String,
+    precioConIgv: Double,
+    limitarAlOriginal: Boolean = true,
+): List<LineaCatalogoItem> =
+    map { linea ->
+        if (linea.lineaId != lineaId) return@map linea
+        val ajustado = if (limitarAlOriginal) {
+            val max = linea.precioOriginalReferencia ?: linea.precioUnitarioEfectivo
+            precioConIgv.coerceIn(0.0, max)
+        } else {
+            precioConIgv.coerceAtLeast(0.0)
+        }
+        linea.copy(precioUnitario = ajustado)
+    }
 
 fun List<LineaCatalogoItem>.actualizarCantidad(lineaId: String, cantidad: Double): List<LineaCatalogoItem> {
     if (cantidad <= 0) return filter { it.lineaId != lineaId }
     return map { linea ->
         if (linea.lineaId != lineaId) return@map linea
-        if (!linea.requiereSeries) return@map linea.copy(cantidad = cantidad)
-        val n = cantidad.roundToInt()
+        val item = linea.catalogItem
+        val cantidadAjustada = item?.coerceCantidadParaEmision(cantidad) ?: cantidad
+        if (!linea.requiereSeries) return@map linea.copy(cantidad = cantidadAjustada)
+        val n = cantidadAjustada.roundToInt()
         if (n <= 0) return@map linea
+        val maxSeries = item?.cantidadMaximaEnEmision()?.roundToInt() ?: n
+        val nFinal = n.coerceAtMost(maxSeries)
         val actuales = linea.numerosSerieUi
         val nuevas = when {
-            actuales.size < n -> actuales + List(n - actuales.size) { "" }
-            actuales.size > n -> actuales.take(n)
+            actuales.size < nFinal -> actuales + List(nFinal - actuales.size) { "" }
+            actuales.size > nFinal -> actuales.take(nFinal)
             else -> actuales
         }
-        linea.copy(cantidad = n.toDouble(), numerosSerie = nuevas, series = emptyList())
+        linea.copy(cantidad = nFinal.toDouble(), numerosSerie = nuevas, series = emptyList())
     }
 }
 
@@ -359,25 +431,29 @@ data class TotalesComprobante(
 )
 
 fun List<LineaCatalogoItem>.calcularTotales(): TotalesComprobante {
-    val subtotal = sumOf { it.subtotal }
-    val igv = sumOf { it.igv }
-    return TotalesComprobante(subtotal = subtotal, igv = igv, total = subtotal + igv)
+    val subtotal = round4(sumOf { it.subtotal })
+    val igv = round4(sumOf { it.igv })
+    val total = round4(sumOf { it.total })
+    return TotalesComprobante(subtotal = subtotal, igv = igv, total = total)
 }
 
 fun List<LineaCatalogoItem>.lineasListasParaEmitir(): Boolean =
     isNotEmpty() && all { it.listaParaEmitir() }
+
+fun List<LineaCatalogoItem>.lineasListasParaEmitirNotaFiscal(): Boolean =
+    isNotEmpty() && all { it.listaParaEmitirNotaFiscal() }
 
 fun List<LineaCatalogoItem>.lineasListasParaSalida(): Boolean =
     isNotEmpty() && all { linea ->
         val item = linea.catalogItem ?: return@all linea.cantidad > 0 && !linea.requiereSeries
         val almacenOk = !item.manejaInventario || !linea.almacenIdEfectivo.isNullOrBlank()
         if (!almacenOk) return@all false
-        if (item.manejaSerie) {
+        if (item.usaSeriesInventario) {
             linea.series.isNotEmpty() &&
                 linea.cantidad == linea.series.size.toDouble() &&
                 linea.seriesEnAlmacen()
         } else {
-            linea.cantidad > 0 && item.hayStockPara(linea.cantidad)
+            linea.cantidad > 0 && item.hayStockParaEmision(linea.cantidad)
         }
     }
 
@@ -386,7 +462,7 @@ fun List<LineaCatalogoItem>.lineasListasParaIngreso(): Boolean =
         val item = linea.catalogItem ?: return@all linea.cantidad > 0
         val almacenOk = !item.manejaInventario || !linea.almacenId.isNullOrBlank()
         if (!almacenOk) return@all false
-        if (item.manejaSerie) {
+        if (item.usaSeriesInventario) {
             val unidades = linea.series.ifEmpty {
                 linea.numerosSerieLimpios().orEmpty().map { num ->
                     ProductoSerie(
@@ -405,16 +481,18 @@ fun List<LineaCatalogoItem>.lineasListasParaIngreso(): Boolean =
         }
     }
 
-fun LineaCatalogoItem.aEmitirLinea(): EmitirLineaRequest = EmitirLineaRequest(
+fun LineaCatalogoItem.aEmitirLinea(incluirPrecio: Boolean = false): EmitirLineaRequest = EmitirLineaRequest(
     catalogItemId = catalogItemId,
     cantidad = cantidad,
+    precioUnitario = if (incluirPrecio) precioUnitarioEfectivo.takeIf { it > 0 } else null,
     serieIds = when {
         seriesEfectivas.isNotEmpty() -> seriesEfectivas.map { it.id }
         else -> numerosSerieLimpios()
     },
 )
 
-fun List<LineaCatalogoItem>.aEmitirLineas(): List<EmitirLineaRequest> = map { it.aEmitirLinea() }
+fun List<LineaCatalogoItem>.aEmitirLineas(incluirPrecio: Boolean = false): List<EmitirLineaRequest> =
+    map { it.aEmitirLinea(incluirPrecio = incluirPrecio) }
 
 fun LineaCatalogoItem.aRegistrarSalidaLinea(): RegistrarMovimientoLineaRequest =
     aRegistrarMovimientoLinea()
@@ -423,7 +501,7 @@ fun List<LineaCatalogoItem>.aRegistrarSalidaLineas(): List<RegistrarMovimientoLi
     map { it.aRegistrarSalidaLinea() }
 
 fun LineaCatalogoItem.aRegistrarMovimientoLinea(): RegistrarMovimientoLineaRequest {
-    if (!manejaSerieEfectivo) {
+    if (!requiereSeries) {
         return RegistrarMovimientoLineaRequest(
             catalogItemId = catalogItemId,
             cantidad = cantidad,
@@ -486,10 +564,9 @@ fun LineaCatalogoItem.enriquecerConCatalogo(
 /** Convierte a línea de [Invoice] al emitir o persistir comprobante. */
 fun LineaCatalogoItem.toSaleDetail(invoiceId: String? = null): SaleDetail {
     val pct = if (afectacionIgvEfectiva == "10") 18.0 else 0.0
-    val factor = 1.0 + pct / 100.0
-    val valorVenta = (precioUnitarioEfectivo * cantidad / factor).redondear2()
-    val igvLinea = (valorVenta * pct / 100.0).redondear2()
-    val totalLinea = (valorVenta + igvLinea).redondear2()
+    val valorVenta = subtotal
+    val igvLinea = igv
+    val totalLinea = total
     return SaleDetail(
         invoiceId = invoiceId,
         catalogItemId = catalogItemId,
@@ -502,7 +579,7 @@ fun LineaCatalogoItem.toSaleDetail(invoiceId: String? = null): SaleDetail {
         mtoValorVenta = valorVenta,
         mtoIgv = igvLinea,
         totalFactura = totalLinea,
-        mtoValorUnitario = (precioUnitarioEfectivo / factor).redondear2(),
+        mtoValorUnitario = valorUnitarioSinIgv,
         mtoBaseIgv = valorVenta,
         porcentajeIgv = pct,
         productoSerie = productoSerie,
@@ -511,5 +588,3 @@ fun LineaCatalogoItem.toSaleDetail(invoiceId: String? = null): SaleDetail {
 
 fun List<LineaCatalogoItem>.toSaleDetails(invoiceId: String? = null): List<SaleDetail> =
     map { it.toSaleDetail(invoiceId) }
-
-private fun Double.redondear2(): Double = kotlin.math.round(this * 100.0) / 100.0

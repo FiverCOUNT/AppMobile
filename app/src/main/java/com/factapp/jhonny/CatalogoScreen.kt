@@ -76,8 +76,7 @@ import com.factapp.jhonny.ui.catalogo.CatalogItemActionSheet
 import com.factapp.jhonny.ui.catalogo.CatalogoAlmacenBar
 import com.factapp.jhonny.ui.catalogo.CatalogoBusquedaBar
 import com.factapp.jhonny.ui.catalogo.filtrarPorBusqueda
-import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
-import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
+import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -141,7 +140,9 @@ fun CatalogoScreen(
             CatalogRepository.listarParaGestion(companyRuc, token)
         }
         resultado
-            .onSuccess { items = it }
+            .onSuccess { lista ->
+                items = if (puedeGestionar) lista else lista.filter { it.activo }
+            }
             .onFailure { error = it.mensajeAuth() }
     }
 
@@ -201,18 +202,12 @@ fun CatalogoScreen(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        containerColor = C.background,
-        contentWindowInsets = scaffoldContentWithoutTopInset(),
-        topBar = {
-            ComprobanteEmitHeader(
-                titulo = "Catálogo",
-                subtitulo = subtituloHeader,
-                icono = Icons.Default.Description,
-                onVolver = onVolver,
-            )
-        },
+    AppEmitScaffold(
+        modifier = modifier.fillMaxSize(),
+        titulo = "Catálogo",
+        subtitulo = subtituloHeader,
+        icono = Icons.Default.Description,
+        onVolver = onVolver,
         floatingActionButton = {
             if (puedeGestionar && !token.isNullOrBlank() && companyRuc.isNotBlank()) {
                 FloatingActionButton(
@@ -291,7 +286,7 @@ fun CatalogoScreen(
                                 text = if (puedeGestionar) {
                                     "Toca + para añadir el primero"
                                 } else {
-                                    "No hay productos disponibles en tu almacén"
+                                    "No hay ítems activos en el catálogo de la empresa"
                                 },
                                 color = C.textSecondary,
                                 fontSize = 14.sp,
@@ -309,7 +304,7 @@ fun CatalogoScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(horizontal = 16.dp)
-                                    .padding(bottom = 4.dp),
+                                    .padding(top = 12.dp, bottom = 4.dp),
                             ) {
                                 CatalogoBusquedaBar(
                                     value = busqueda,
@@ -364,7 +359,7 @@ fun CatalogoScreen(
                                 )
                             }
                         }
-                        item { Spacer(modifier = Modifier.height(88.dp)) }
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
                     }
                 }
             }

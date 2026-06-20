@@ -1,7 +1,9 @@
 package com.factapp.jhonny.modelos
 
 import java.time.Instant
+import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
@@ -23,6 +25,13 @@ object TimestampConverter {
         return when {
             raw.matches(Regex("^-?\\d{10}$")) -> raw.toLong() * 1000L
             raw.matches(Regex("^-?\\d{11,}$")) -> raw.toLong()
+            raw.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) ->
+                LocalDate.parse(raw)
+                    .atStartOfDay(ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli()
+            raw.matches(Regex("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$")) ->
+                OffsetDateTime.parse("${raw}Z", apiFormatter).toInstant().toEpochMilli()
             else -> OffsetDateTime.parse(raw, apiFormatter).toInstant().toEpochMilli()
         }
     }

@@ -2,23 +2,33 @@ package com.factapp.jhonny.network.dto
 
 import com.factapp.jhonny.network.dto.model.Invoice
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-fun Invoice.fechaEmisionLocal(): LocalDate? {
-    val raw = fechaEmision?.trim().orEmpty()
-    if (raw.length < 10) return null
-    return runCatching { LocalDate.parse(raw.substring(0, 10)) }.getOrNull()
+private val ZONA_PERU: ZoneId = ZoneId.of("America/Lima")
+
+fun Invoice.fechaEmisionLocal(zone: ZoneId = ZONA_PERU): LocalDate? {
+    val ms = fechaEmision ?: return null
+    return ms.toLocalDate(zone)
 }
 
-fun List<Invoice>.filtrarPorRango(fechaInicio: LocalDate, fechaFin: LocalDate): List<Invoice> =
+fun List<Invoice>.filtrarPorRango(
+    fechaInicio: LocalDate,
+    fechaFin: LocalDate,
+    zone: ZoneId = ZONA_PERU,
+): List<Invoice> =
     filter { doc ->
-        val f = doc.fechaEmisionLocal() ?: return@filter false
+        val f = doc.fechaEmisionLocal(zone) ?: return@filter false
         !f.isBefore(fechaInicio) && !f.isAfter(fechaFin)
     }
 
-fun List<Invoice>.filtrarPorDia(dia: LocalDate): List<Invoice> =
-    filtrarPorRango(dia, dia)
+fun List<Invoice>.filtrarPorDia(dia: LocalDate, zone: ZoneId = ZONA_PERU): List<Invoice> =
+    filtrarPorRango(dia, dia, zone)
+
+/** Más reciente primero (fecha de emisión / registro). */
+fun List<Invoice>.ordenadosPorFechaEmisionReciente(): List<Invoice> =
+    sortedByDescending { it.fechaEmision ?: 0L }
 
 fun formatearDiaElegante(fecha: LocalDate): String {
     val texto = DateTimeFormatter.ofPattern("EEEE, d MMM yyyy", Locale("es", "PE"))
@@ -29,3 +39,6 @@ fun formatearDiaElegante(fecha: LocalDate): String {
 fun formatearRangoElegante(inicio: LocalDate, fin: LocalDate): String =
     if (inicio == fin) formatearDiaElegante(inicio)
     else "${inicio.dayOfMonth} – ${formatearDiaElegante(fin)}"
+
+fun Invoice.fechaEmisionLegible(): String? =
+    fechaEmision?.formatFechaLegible()

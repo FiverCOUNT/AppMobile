@@ -9,6 +9,12 @@ import kotlin.math.roundToInt
 
 /** Stock e inventario sobre [CatalogItem]. */
 
+/** Solo productos contados por unidad (NIU) admiten número de serie. */
+fun unidadPermiteSerie(unidad: String): Boolean = unidad.uppercase() == "NIU"
+
+val CatalogItem.usaSeriesInventario: Boolean
+    get() = manejaSerie && unidadPermiteSerie(unidad)
+
 val CatalogItem.manejaInventario: Boolean
     get() = esProducto && manejaStock
 
@@ -16,8 +22,9 @@ val CatalogItem.stockDisponible: Double
     get() = stockActual ?: 0.0
 
 fun CatalogItem.etiquetaStock(): String? {
-    if (!manejaInventario) return null
-    return if (manejaSerie) {
+    if (!esProducto) return null
+    if (!manejaStock && !usaSeriesInventario) return null
+    return if (usaSeriesInventario) {
         val n = stockDisponible.roundToInt()
         "Stock: $n ${etiquetaUnidad(unidad, plural = n != 1)} (con serie)"
     } else {
@@ -25,14 +32,40 @@ fun CatalogItem.etiquetaStock(): String? {
     }
 }
 
+/** Producto con stock reportado por el API (emisión de comprobantes). */
+fun CatalogItem.debeValidarStockEnEmision(): Boolean =
+    esProducto && (manejaStock || manejaSerie || stockActual != null)
+
 fun CatalogItem.hayStockPara(cantidad: Double): Boolean {
     if (!manejaInventario) return true
     return stockDisponible >= cantidad
 }
 
+fun CatalogItem.hayStockParaEmision(cantidad: Double): Boolean {
+    if (!debeValidarStockEnEmision()) return true
+    return stockDisponible >= cantidad
+}
+
+/** Cantidad máxima permitida en una línea (respeta stock del almacén). */
+fun CatalogItem.cantidadMaximaEnLinea(): Double =
+    if (manejaInventario) stockDisponible.coerceAtLeast(0.0) else Double.MAX_VALUE
+
+fun CatalogItem.cantidadMaximaEnEmision(): Double =
+    if (debeValidarStockEnEmision()) stockDisponible.coerceAtLeast(0.0) else Double.MAX_VALUE
+
+fun CatalogItem.coerceCantidadConStock(cantidad: Double): Double {
+    if (!manejaInventario) return cantidad.coerceAtLeast(0.0)
+    return cantidad.coerceIn(0.0, cantidadMaximaEnLinea())
+}
+
+fun CatalogItem.coerceCantidadParaEmision(cantidad: Double): Double {
+    if (!debeValidarStockEnEmision()) return cantidad.coerceAtLeast(0.0)
+    return cantidad.coerceIn(0.0, cantidadMaximaEnEmision())
+}
+
 /** Catálogo: ítem serializable (flag API o nombre tipo "Producto Series"). */
 fun CatalogItem.requiereSeriesEnCatalogo(): Boolean =
-    manejaSerie || nombre.contains("serie", ignoreCase = true)
+    usaSeriesInventario || (nombre.contains("serie", ignoreCase = true) && unidadPermiteSerie(unidad))
 
 fun formatCantidadInventario(cantidad: Double): String =
     if (cantidad == cantidad.roundToInt().toDouble()) {
@@ -55,6 +88,10 @@ fun formatCantidadConUnidad(cantidad: Double, unidad: String): String {
 }
 
 fun CatalogItem.disponibleParaIngreso(): Boolean =
+    activo && esProducto && manejaStock
+
+/** Productos que pueden devolverse (activos con stock, sin exigir saldo actual). */
+fun CatalogItem.disponibleParaDevolucionCliente(): Boolean =
     activo && esProducto && manejaStock
 
 fun CatalogItem.disponibleParaSalida(): Boolean =

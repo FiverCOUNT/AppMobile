@@ -50,6 +50,7 @@ fun CatalogoBusquedaBar(
     modifier: Modifier = Modifier,
     totalItems: Int = 0,
     resultados: Int = 0,
+    placeholder: String = "Buscar por nombre o tipo…",
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -96,7 +97,7 @@ fun CatalogoBusquedaBar(
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (value.isEmpty()) {
                             Text(
-                                text = "Buscar por nombre o tipo…",
+                                text = placeholder,
                                 color = C.textSecondary.copy(alpha = 0.75f),
                                 fontSize = 15.sp,
                             )
