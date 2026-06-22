@@ -20,6 +20,7 @@ import com.factapp.jhonny.network.dto.request.RefreshTokenRequest
 import com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest
 import com.factapp.jhonny.network.dto.model.ProductoDevolucionCliente
 import com.factapp.jhonny.network.dto.model.ProductoSerie
+import com.factapp.jhonny.network.dto.model.SeriesComprobanteItem
 import com.factapp.jhonny.network.dto.request.RegistrarEntradaApiBody
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -113,6 +114,14 @@ interface ApiService {
         @Query("desde") desde: String? = null,
         @Query("hasta") hasta: String? = null,
     ): List<Invoice>
+
+    /** Series entregadas al cliente en la venta (NC devolución). */
+    @GET("empresas/{ruc}/comprobantes/{id}/series-entregadas")
+    suspend fun listarSeriesEntregadasComprobante(
+        @Path("ruc") ruc: String,
+        @Path("id") comprobanteId: String,
+        @Header("Authorization") authorization: String,
+    ): List<SeriesComprobanteItem>
 
     @POST("empresas/{ruc}/comprobantes/{id}/emitir")
     suspend fun reenviarComprobante(

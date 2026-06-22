@@ -278,6 +278,37 @@ fun LineaCatalogoItem.seriesEnAlmacen(): Boolean {
     return series.all { it.almacenId == null || it.almacenId == alm }
 }
 
+fun LineaCatalogoItem.seriesDisponiblesParaEmision(): Boolean {
+    if (!requiereSeries) return true
+    return series.isNotEmpty() && seriesValidas()
+}
+
+/** Marca el almacén de salida en cada línea antes de emitir (no altera el almacén real de cada serie). */
+fun List<LineaCatalogoItem>.prepararLineasParaEmitir(almacenSalidaId: String): List<LineaCatalogoItem> {
+    if (almacenSalidaId.isBlank()) return this
+    return map { linea -> linea.copy(almacenId = almacenSalidaId) }
+}
+
+fun LineaCatalogoItem.aEmitirLinea(incluirPrecio: Boolean = false): EmitirLineaRequest {
+    val unidades = seriesEfectivas.filter {
+        it.id.isNotBlank() && it.id != "temp" && !it.id.startsWith("scan-")
+    }
+    val numeros = unidades.map { it.numeroSerie.trim() }.filter { it.isNotEmpty() }
+    val ids = unidades.map { it.id }
+    val cantidadEmitir = when {
+        unidades.isNotEmpty() -> unidades.size.toDouble()
+        else -> cantidad
+    }
+    return EmitirLineaRequest(
+        catalogItemId = catalogItemId,
+        cantidad = cantidadEmitir,
+        precioUnitario = if (incluirPrecio) precioUnitarioEfectivo.takeIf { it > 0 } else null,
+        serieIds = ids.takeIf { it.isNotEmpty() },
+        series = numeros.takeIf { it.isNotEmpty() },
+        numerosSerie = numeros.takeIf { it.isNotEmpty() },
+    )
+}
+
 fun LineaCatalogoItem.numerosSerieLimpios(): List<String>? {
     if (!requiereSeries) return null
     return numerosSerieUi.map { it.trim() }.filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() }
@@ -285,12 +316,13 @@ fun LineaCatalogoItem.numerosSerieLimpios(): List<String>? {
 
 fun LineaCatalogoItem.listaParaEmitir(): Boolean {
     val item = catalogItem
+    val seriesOk = if (requiereSeries) seriesDisponiblesParaEmision() else seriesValidas()
     if (item != null) {
         return cantidad > 0 &&
             (!item.debeValidarStockEnEmision() || item.hayStockParaEmision(cantidad)) &&
-            seriesValidas()
+            seriesOk
     }
-    return cantidad > 0 && seriesValidas()
+    return cantidad > 0 && seriesOk
 }
 
 /** Notas de crédito/débito: no exigen stock de almacén ni series de inventario. */
@@ -480,16 +512,6 @@ fun List<LineaCatalogoItem>.lineasListasParaIngreso(): Boolean =
             linea.cantidad > 0
         }
     }
-
-fun LineaCatalogoItem.aEmitirLinea(incluirPrecio: Boolean = false): EmitirLineaRequest = EmitirLineaRequest(
-    catalogItemId = catalogItemId,
-    cantidad = cantidad,
-    precioUnitario = if (incluirPrecio) precioUnitarioEfectivo.takeIf { it > 0 } else null,
-    serieIds = when {
-        seriesEfectivas.isNotEmpty() -> seriesEfectivas.map { it.id }
-        else -> numerosSerieLimpios()
-    },
-)
 
 fun List<LineaCatalogoItem>.aEmitirLineas(incluirPrecio: Boolean = false): List<EmitirLineaRequest> =
     map { it.aEmitirLinea(incluirPrecio = incluirPrecio) }

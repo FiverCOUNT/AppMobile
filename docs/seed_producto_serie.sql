@@ -5,7 +5,7 @@
 -- Uso:
 --   psql -U postgres -d factapp -f docs/seed_producto_serie.sql
 --
--- Inserta 20 números de serie DISPONIBLE para "Producto Series" y otros serializados.
+-- Inserta 50 números de serie DISPONIBLE para "Producto Series" y otros serializados.
 -- =============================================================================
 
 BEGIN;
@@ -68,7 +68,7 @@ INNER JOIN LATERAL (
     ORDER BY a.codigo
     LIMIT 1
 ) alm ON true
-CROSS JOIN generate_series(1, 20) AS s(n)
+CROSS JOIN generate_series(1, 50) AS s(n)
 WHERE COALESCE(ci.activo, true) = true
   AND (
       ci.maneja_serie = true
@@ -83,7 +83,7 @@ WHERE COALESCE(ci.activo, true) = true
         AND ps.numero_serie = 'PS-SERIES-' || lpad(s.n::text, 3, '0')
   );
 
--- Otros productos serializados: 20 series cada uno
+-- Otros productos serializados: 50 series cada uno
 INSERT INTO producto_serie (
     id, company_ruc, catalog_item_id, numero_serie, almacen_id, estado, created_at, updated_at
 )
@@ -105,7 +105,7 @@ INNER JOIN LATERAL (
     ORDER BY a.codigo
     LIMIT 1
 ) alm ON true
-CROSS JOIN generate_series(1, 20) AS s(n)
+CROSS JOIN generate_series(1, 50) AS s(n)
 WHERE ci.maneja_serie = true
   AND COALESCE(ci.activo, true) = true
   AND lower(ci.nombre) NOT LIKE '%producto%series%'
@@ -116,6 +116,42 @@ WHERE ci.maneja_serie = true
       WHERE ps.company_ruc = ci.company_ruc
         AND ps.catalog_item_id = ci.id
         AND ps.numero_serie = 'SN-' || upper(substr(replace(ci.id::text, '-', ''), 1, 8)) || '-' || lpad(s.n::text, 3, '0')
+  );
+
+-- Lote extra con prefijo distinto (re-ejecutable sin chocar con PS-SERIES-001..050)
+INSERT INTO producto_serie (
+    id, company_ruc, catalog_item_id, numero_serie, almacen_id, estado, created_at, updated_at
+)
+SELECT
+    gen_random_uuid(),
+    ci.company_ruc,
+    ci.id,
+    'PS-LOT-' || to_char(now(), 'YYYYMMDD') || '-' || lpad(s.n::text, 3, '0'),
+    alm.id,
+    'DISPONIBLE',
+    now(),
+    now()
+FROM catalog_item ci
+INNER JOIN LATERAL (
+    SELECT a.id
+    FROM almacen a
+    WHERE a.company_ruc = ci.company_ruc
+      AND COALESCE(a.activo, true) = true
+    ORDER BY a.codigo
+    LIMIT 1
+) alm ON true
+CROSS JOIN generate_series(1, 30) AS s(n)
+WHERE COALESCE(ci.activo, true) = true
+  AND (
+      lower(ci.nombre) LIKE '%producto%series%'
+      OR lower(ci.nombre) LIKE '%producto%serie%'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM producto_serie ps
+      WHERE ps.company_ruc = ci.company_ruc
+        AND ps.catalog_item_id = ci.id
+        AND ps.numero_serie = 'PS-LOT-' || to_char(now(), 'YYYYMMDD') || '-' || lpad(s.n::text, 3, '0')
   );
 
 COMMIT;

@@ -1,5 +1,7 @@
 package com.factapp.jhonny
 
+import com.factapp.jhonny.network.dto.model.dniValido
+
 enum class TipoComprobante(
     val titulo: String,
     val detalle: String,
@@ -40,4 +42,14 @@ enum class TipoComprobante(
     /** Valor enviado al API en [com.factapp.jhonny.network.dto.EmitirComprobanteRequest.tipo]. */
     val tipoApi: String
         get() = name
+
+    /** Documento del receptor completo para buscar cliente registrado. */
+    fun docReceptorListo(doc: String): Boolean {
+        val d = doc.filter { it.isDigit() }
+        return when (this) {
+            FACTURA, NOTA_CREDITO -> d.length == 11
+            BOLETA -> dniValido(d)
+            NOTA_DEBITO, GUIA_EMISION -> d.length == 8 || d.length == 11
+        }
+    }
 }

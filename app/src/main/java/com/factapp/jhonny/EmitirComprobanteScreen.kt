@@ -85,19 +85,28 @@ import androidx.compose.material3.OutlinedButton
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import com.factapp.jhonny.modelos.Usuario
+import com.factapp.jhonny.modelos.esAdmin
+import com.factapp.jhonny.network.dto.model.Almacen
 import com.factapp.jhonny.network.CatalogRepository
 import com.factapp.jhonny.network.ClienteRepository
 import com.factapp.jhonny.network.ComprobanteRepository
-import com.factapp.jhonny.network.dto.model.aptosParaBoleta
+import com.factapp.jhonny.network.dto.model.aptosParaComprobante
+import com.factapp.jhonny.network.dto.model.esAptoReceptor
+import com.factapp.jhonny.network.InventarioRepository
+import com.factapp.jhonny.network.dto.construirEntradaDevolucionNotaCredito
+import com.factapp.jhonny.network.dto.lineasParaIngresoDevolucion
 import com.factapp.jhonny.network.dto.model.Cliente
+import com.factapp.jhonny.network.dto.model.lineasListasParaIngreso
 import com.factapp.jhonny.network.dto.model.CatalogItem
 import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.model.LineaCatalogoItem
+import com.factapp.jhonny.network.dto.model.ProductoSerie
 import com.factapp.jhonny.network.dto.model.aEmitirLineas
 import com.factapp.jhonny.network.dto.model.actualizarCantidad
 import com.factapp.jhonny.network.dto.model.actualizarPrecioAcreditar
 import com.factapp.jhonny.network.dto.almacenIdParaOperaciones
 import com.factapp.jhonny.network.mensajeAuth
+import com.factapp.jhonny.network.dto.model.prepararLineasParaEmitir
 import com.factapp.jhonny.network.dto.usaSeriesInventario
 import com.factapp.jhonny.network.dto.model.agregarDesdeCatalogo
 import com.factapp.jhonny.network.dto.model.agregarDesdeCatalogoSiHayStock
@@ -131,13 +140,23 @@ import com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest
 import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
 import com.factapp.jhonny.ui.components.SeleccionSeriesSheet
-import com.factapp.jhonny.ui.emitir.CatalogoBuscarSheet
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import com.factapp.jhonny.network.dto.PresetPeriodoComprobante
+import com.factapp.jhonny.ui.emitir.EmitirAlmacenOrigenCard
+import com.factapp.jhonny.ui.emitir.ComprobanteAfectadoPeriodoFiltros
 import com.factapp.jhonny.ui.emitir.ComprobanteAfectadoBuscarField
+import com.factapp.jhonny.ui.emitir.CatalogoBuscarSheet
 import com.factapp.jhonny.ui.emitir.MotivoNotaCreditoSelector
 import com.factapp.jhonny.ui.emitir.MotivoNotaDebitoSelector
 import com.factapp.jhonny.ui.inventario.SalidaClienteBuscarSheet
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 import com.factapp.jhonny.ui.theme.EasyTheme
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -159,7 +178,21 @@ fun EmitirComprobanteScreen(
     val context = LocalContext.current
     val companyRuc = usuario.companyRucParaCatalogo()
     val token = usuario?.token
-    val almacenId = usuario.almacenIdParaOperaciones().orEmpty()
+    val esBoleta = tipo == TipoComprobante.BOLETA
+    val esFactura = tipo == TipoComprobante.FACTURA
+    val esAdmin = usuario?.esAdmin() == true
+    val puedeElegirAlmacen = esAdmin && (esFactura || esBoleta)
+
+    var almacenes by remember { mutableStateOf<List<Almacen>>(emptyList()) }
+    var cargandoAlmacenes by remember { mutableStateOf(false) }
+    var almacenSeleccionadoId by remember(usuario?.almacenId, puedeElegirAlmacen) {
+        mutableStateOf(usuario?.almacenId?.takeIf { it.isNotBlank() })
+    }
+    val almacenId = if (puedeElegirAlmacen) {
+        almacenSeleccionadoId.orEmpty()
+    } else {
+        usuario.almacenIdParaOperaciones().orEmpty()
+    }
 
     var clienteSeleccionado by remember { mutableStateOf<Cliente?>(null) }
     var docReceptor by remember { mutableStateOf("") }
@@ -171,6 +204,10 @@ fun EmitirComprobanteScreen(
     var comprobanteAfectado by remember { mutableStateOf<Invoice?>(null) }
     var comprobantesEmitidos by remember { mutableStateOf<List<Invoice>>(emptyList()) }
     var cargandoComprobantes by remember { mutableStateOf(false) }
+    val hoyComprobantes = remember { LocalDate.now() }
+    var presetPeriodoAfectado by remember { mutableStateOf(PresetPeriodoComprobante.HOY) }
+    var fechaAfectadoElegida by remember { mutableStateOf(hoyComprobantes) }
+    var mostrarDatePickerAfectado by remember { mutableStateOf(false) }
     var motivo by remember { mutableStateOf("") }
     var motivoCodigoNc by remember { mutableStateOf<String?>(null) }
     var motivoCodigoNd by remember { mutableStateOf<String?>(null) }
@@ -186,53 +223,80 @@ fun EmitirComprobanteScreen(
     var mostrarBuscarCatalogo by remember { mutableStateOf(false) }
     var busquedaCatalogo by remember { mutableStateOf("") }
     var lineaSeriesLineaId by remember { mutableStateOf<String?>(null) }
+    var seriesEntregadasPorItem by remember { mutableStateOf<Map<String, List<ProductoSerie>>>(emptyMap()) }
 
     val esNota = tipo.esNota
 
     LaunchedEffect(companyRuc, token, tipo) {
         if (companyRuc.isNullOrBlank()) return@LaunchedEffect
-        when {
-            tipo == TipoComprobante.BOLETA -> {
-                withContext(Dispatchers.IO) {
-                    ClienteRepository.listar(companyRuc, token).onSuccess { lista ->
-                        clientes = lista.aptosParaBoleta()
-                        if (clienteSeleccionado?.esEmpresa == true) {
-                            clienteSeleccionado = null
-                        }
-                    }
-                }
-            }
-            tipo.esNota -> {
-                withContext(Dispatchers.IO) {
-                    ClienteRepository.listar(companyRuc, token).onSuccess { clientes = it }
+        withContext(Dispatchers.IO) {
+            ClienteRepository.listar(companyRuc, token).onSuccess { lista ->
+                val aptos = lista.aptosParaComprobante(tipo)
+                clientes = aptos
+                clienteSeleccionado?.let { sel ->
+                    if (aptos.none { it.id == sel.id }) clienteSeleccionado = null
                 }
             }
         }
     }
 
-    LaunchedEffect(companyRuc, token, tipo) {
+    val rangoComprobantesAfectado by remember(presetPeriodoAfectado, fechaAfectadoElegida, hoyComprobantes) {
+        derivedStateOf { presetPeriodoAfectado.rango(hoyComprobantes, fechaAfectadoElegida) }
+    }
+
+    LaunchedEffect(companyRuc, token, tipo, presetPeriodoAfectado, rangoComprobantesAfectado) {
         if (companyRuc.isNullOrBlank()) return@LaunchedEffect
         if (tipo != TipoComprobante.NOTA_CREDITO && tipo != TipoComprobante.NOTA_DEBITO) return@LaunchedEffect
         cargandoComprobantes = true
         withContext(Dispatchers.IO) {
-            ComprobanteRepository.listarEmitidos(companyRuc, token)
-                .onSuccess { comprobantesEmitidos = it }
+            ComprobanteRepository.listarEmitidos(
+                companyRuc = companyRuc,
+                token = token,
+                desde = rangoComprobantesAfectado.first,
+                hasta = rangoComprobantesAfectado.second,
+            ).onSuccess { comprobantesEmitidos = it }
         }
         cargandoComprobantes = false
     }
 
-    LaunchedEffect(docReceptor, clientes, esNota, tipo) {
-        if (!esNota || clientes.isEmpty()) return@LaunchedEffect
+    LaunchedEffect(docReceptor, clientes, tipo) {
+        if (clientes.isEmpty()) return@LaunchedEffect
         val doc = docReceptor.filter { it.isDigit() }
-        val docValido = when (tipo) {
-            TipoComprobante.NOTA_CREDITO -> doc.length == 11
-            else -> doc.length == 8 || doc.length == 11
+        if (!tipo.docReceptorListo(doc)) {
+            if (tipo != TipoComprobante.NOTA_CREDITO) clienteSeleccionado = null
+            return@LaunchedEffect
         }
-        if (!docValido) return@LaunchedEffect
         clientes.buscarPorDocumento(doc)?.let { cli ->
-            nombreReceptor = cli.razonSocial
-            clienteSeleccionado = cli
+            if (cli.esAptoReceptor(tipo)) {
+                nombreReceptor = cli.razonSocial
+                clienteSeleccionado = cli
+            } else {
+                clienteSeleccionado = null
+            }
+        } ?: run {
+            clienteSeleccionado = null
         }
+    }
+
+    LaunchedEffect(companyRuc, token, puedeElegirAlmacen) {
+        if (!puedeElegirAlmacen || companyRuc.isNullOrBlank() || token.isNullOrBlank()) {
+            almacenes = emptyList()
+            return@LaunchedEffect
+        }
+        cargandoAlmacenes = true
+        withContext(Dispatchers.IO) {
+            InventarioRepository.listarAlmacenes(companyRuc, token)
+                .onSuccess { lista ->
+                    almacenes = lista
+                    if (almacenSeleccionadoId == null || lista.none { it.id == almacenSeleccionadoId }) {
+                        almacenSeleccionadoId = usuario?.almacenId
+                            ?.takeIf { id -> lista.any { it.id == id } }
+                            ?: lista.firstOrNull()?.id
+                    }
+                }
+                .onFailure { almacenes = emptyList() }
+        }
+        cargandoAlmacenes = false
     }
 
     LaunchedEffect(companyRuc, token, almacenId) {
@@ -253,13 +317,31 @@ fun EmitirComprobanteScreen(
         cargandoCatalogo = false
     }
 
-    val esBoleta = tipo == TipoComprobante.BOLETA
-    val esFactura = tipo == TipoComprobante.FACTURA
+    fun onAlmacenOrigenChange(nuevoId: String) {
+        if (nuevoId == almacenSeleccionadoId) return
+        if (lineas.isNotEmpty()) {
+            lineas = emptyList()
+            lineaSeriesLineaId = null
+            Toast.makeText(
+                context,
+                "Almacén cambiado: se vació el detalle para usar el stock de la nueva bodega.",
+                Toast.LENGTH_SHORT,
+            ).show()
+        }
+        almacenSeleccionadoId = nuevoId
+    }
     val esGuiaEmision = tipo.esGuiaEmision
     val esNotaCredito = tipo == TipoComprobante.NOTA_CREDITO
     val esNotaDebito = tipo == TipoComprobante.NOTA_DEBITO
     val esNotaFiscal = esNotaCredito || esNotaDebito
     val acreditacionPorMonto = MotivosNotaCreditoSunat.esAcreditacionPorMonto(motivoCodigoNc)
+    val esDevolucionMercaderia = MotivosNotaCreditoSunat.esDevolucionMercaderia(motivoCodigoNc)
+    val esNcDevolucionCantidad = esNotaCredito && !acreditacionPorMonto
+    val lineasNcConDescuento by remember(lineas, acreditacionPorMonto) {
+        derivedStateOf {
+            if (acreditacionPorMonto) lineas.filter { it.precioUnitarioEfectivo > 0 } else lineas
+        }
+    }
     val ajustePorItemsNd = MotivosNotaDebitoSunat.esAjustePorItems(motivoCodigoNd)
     val documentoAfectado = comprobanteAfectado
         ?: Invoice.fromEtiqueta(docReferencia.trim())
@@ -267,24 +349,33 @@ fun EmitirComprobanteScreen(
         documentoAfectado != null ||
         referenciaComprobanteValida(docReferencia)
     val puedeAgregarDesdeCatalogo =
-        !esGuiaEmision && usuario != null && (!esNotaFiscal || docReferenciaValida)
+        !esGuiaEmision && usuario != null && !esNotaCredito && (!esNotaDebito || docReferenciaValida)
+
+    val docReceptorEfectivo by remember(docReceptor, clienteSeleccionado) {
+        derivedStateOf {
+            val manual = docReceptor.filter { it.isDigit() }
+            manual.ifBlank {
+                clienteSeleccionado?.numeroDoc?.filter { it.isDigit() }.orEmpty()
+            }
+        }
+    }
 
     val sugerenciasComprobante by remember(
         comprobantesEmitidos,
         docReferencia,
-        docReceptor,
+        docReceptorEfectivo,
         comprobanteAfectado,
         esNotaCredito,
-        esNotaDebito,
+        tipo,
     ) {
         derivedStateOf {
             if (comprobanteAfectado != null) return@derivedStateOf emptyList()
-            val doc = docReceptor.filter { it.isDigit() }
-            val docMinimo = if (esNotaDebito) 8 else 11
-            if (docReferencia.isBlank() && doc.length < docMinimo) return@derivedStateOf emptyList()
+            val busquedaActiva = docReferencia.isNotBlank()
+            val docClienteListo = tipo.docReceptorListo(docReceptorEfectivo)
+            if (!busquedaActiva && !docClienteListo) return@derivedStateOf emptyList()
             comprobantesEmitidos.filtrarComprobantesAfectados(
                 query = docReferencia,
-                docCliente = docReceptor,
+                docCliente = docReceptorEfectivo,
                 soloFacturas = esNotaCredito,
             )
         }
@@ -302,7 +393,27 @@ fun EmitirComprobanteScreen(
 
     LaunchedEffect(motivoCodigoNc, esNotaCredito) {
         if (!esNotaCredito || lineas.isEmpty()) return@LaunchedEffect
-        lineas = lineas.prepararParaMotivoNc(motivoCodigoNc)
+        lineas = lineas
+            .filter { it.cantidadOriginalReferencia != null || it.precioOriginalReferencia != null }
+            .prepararParaMotivoNc(motivoCodigoNc)
+    }
+
+    LaunchedEffect(comprobanteAfectado?.id, esNcDevolucionCantidad, companyRuc, token) {
+        if (!esNcDevolucionCantidad || comprobanteAfectado?.id.isNullOrBlank() || companyRuc.isNullOrBlank()) {
+            seriesEntregadasPorItem = emptyMap()
+            return@LaunchedEffect
+        }
+        withContext(Dispatchers.IO) {
+            ComprobanteRepository.listarSeriesEntregadas(
+                companyRuc = companyRuc,
+                token = token,
+                comprobanteId = comprobanteAfectado!!.id,
+            ).onSuccess { items ->
+                seriesEntregadasPorItem = items.associate { it.catalogItemId to it.series }
+            }.onFailure {
+                seriesEntregadasPorItem = emptyMap()
+            }
+        }
     }
 
     LaunchedEffect(motivoCodigoNd, esNotaDebito, comprobanteAfectado?.id, catalogo) {
@@ -332,6 +443,13 @@ fun EmitirComprobanteScreen(
                 .prepararParaMotivoNd(motivoCodigoNd)
             else -> lineas
         }
+        if (esNotaFiscal && invoice.details.isEmpty()) {
+            Toast.makeText(
+                context,
+                "Comprobante sin detalle de ítems. Los productos no se cargaron automáticamente.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
         invoice.cliente?.let { cli ->
             clienteSeleccionado = cli
             docReceptor = cli.numeroDoc
@@ -351,7 +469,11 @@ fun EmitirComprobanteScreen(
         lineas = emptyList()
     }
 
-    val totales = lineas.calcularTotales()
+    val totales = if (esNotaCredito && acreditacionPorMonto) {
+        lineasNcConDescuento.calcularTotales()
+    } else {
+        lineas.calcularTotales()
+    }
 
     val receptor = remember(esBoleta, esFactura, esNotaCredito, clienteSeleccionado, docReceptor, nombreReceptor) {
         receptorParaEmitir(
@@ -366,8 +488,10 @@ fun EmitirComprobanteScreen(
     val docReceptorInvalido = when {
         esFactura || esNotaCredito ->
             docReceptor.isNotBlank() && docReceptor.length != 11
-        esNotaDebito ->
-            docReceptor.isNotBlank() && docReceptor.length !in listOf(8, 11)
+        esNotaDebito || esGuiaEmision ->
+            docReceptor.isNotBlank() && !tipo.docReceptorListo(docReceptor)
+        esBoleta ->
+            docReceptor.isNotBlank() && !tipo.docReceptorListo(docReceptor)
         else -> false
     }
 
@@ -389,16 +513,19 @@ fun EmitirComprobanteScreen(
         TipoComprobante.NOTA_DEBITO -> 11
         else -> 15
     }
+    val placeholderDocReceptor = when (tipo) {
+        TipoComprobante.BOLETA -> "Ej. 45678901"
+        TipoComprobante.NOTA_DEBITO, TipoComprobante.GUIA_EMISION ->
+            "RUC 11 dígitos o DNI 8 dígitos"
+        else -> "Ej. 20123456789"
+    }
     fun onDocReceptorChange(raw: String) {
         docReceptor = raw.filter { it.isDigit() }.take(maxDocReceptor)
         if (esNotaCredito) {
             clienteSeleccionado = null
             limpiarComprobanteAfectado()
-        } else if (esNotaDebito) {
-            val doc = docReceptor.filter { it.isDigit() }
-            if (doc.length !in listOf(8, 11)) {
-                clienteSeleccionado = null
-            }
+        } else if (!tipo.docReceptorListo(docReceptor)) {
+            clienteSeleccionado = null
         }
     }
 
@@ -406,8 +533,9 @@ fun EmitirComprobanteScreen(
         esGuiaEmision ->
             facturasVinculadas.isNotEmpty() && receptorValido
         esNotaCredito -> {
+            val lineasEvaluadas = if (acreditacionPorMonto) lineasNcConDescuento else lineas
             val lineasNcOk = if (acreditacionPorMonto) {
-                lineas.all { lin ->
+                lineasEvaluadas.isNotEmpty() && lineasEvaluadas.all { lin ->
                     val maxPrecio = lin.precioOriginalReferencia ?: 0.0
                     val maxCant = lin.cantidadOriginalReferencia ?: lin.cantidad
                     lin.precioUnitarioEfectivo > 0 &&
@@ -416,14 +544,20 @@ fun EmitirComprobanteScreen(
                         lin.cantidad <= maxCant + 0.009
                 }
             } else {
-                lineas.all { it.cantidad > 0 }
+                lineas.all { lin ->
+                    val maxCant = lin.cantidadOriginalReferencia
+                    maxCant != null &&
+                        lin.cantidad > 0 &&
+                        lin.cantidad <= maxCant + 0.009
+                }
             }
-            lineas.isNotEmpty() &&
+            lineasEvaluadas.isNotEmpty() &&
                 lineasNcOk &&
-                lineas.lineasListasParaEmitirNotaFiscal() &&
+                lineasEvaluadas.lineasListasParaEmitirNotaFiscal() &&
                 docReferenciaValida &&
                 motivoCodigoNc != null &&
-                receptorValido
+                receptorValido &&
+                (!esDevolucionMercaderia || almacenId.isNotBlank())
         }
         esNotaDebito -> {
             val lineasNdOk = if (ajustePorItemsNd) {
@@ -443,21 +577,47 @@ fun EmitirComprobanteScreen(
                 motivoCodigoNd != null &&
                 receptorValido
         }
-        else -> lineas.isNotEmpty() && lineas.lineasListasParaEmitir() && receptorValido
+        else -> lineas.isNotEmpty() &&
+            lineas.lineasListasParaEmitir() &&
+            receptorValido &&
+            (!puedeElegirAlmacen || almacenId.isNotBlank())
     }
 
     fun emitirComprobante() {
         val ruc = companyRuc.orEmpty()
         val receptorEmitir = receptor ?: return
-        val request = EmitirComprobanteRequest(
+        guardando = true
+        scope.launch {
+            val almEmitir = when {
+                puedeElegirAlmacen -> almacenId
+                else -> almacenId.takeIf { it.isNotBlank() }.orEmpty()
+            }
+            if (puedeElegirAlmacen && almEmitir.isBlank() && lineas.isNotEmpty()) {
+                guardando = false
+                Toast.makeText(
+                    context,
+                    "Elige el almacén de salida antes de emitir.",
+                    Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
+            val lineasEmitir = if (almEmitir.isNotBlank()) {
+                lineas.prepararLineasParaEmitir(almEmitir)
+            } else {
+                lineas
+            }
+            val request = EmitirComprobanteRequest(
             companyRuc = ruc,
             tipo = tipo.tipoApi,
             receptor = receptorEmitir,
             lineas = when {
                 esGuiaEmision -> emptyList()
-                esNotaCredito -> lineas.aEmitirLineas(incluirPrecio = acreditacionPorMonto)
-                esNotaDebito -> lineas.aEmitirLineas(incluirPrecio = ajustePorItemsNd)
-                else -> lineas.aEmitirLineas()
+                esNotaCredito -> {
+                    val emitibles = if (acreditacionPorMonto) lineasNcConDescuento else lineasEmitir
+                    emitibles.aEmitirLineas(incluirPrecio = acreditacionPorMonto)
+                }
+                esNotaDebito -> lineasEmitir.aEmitirLineas(incluirPrecio = ajustePorItemsNd)
+                else -> lineasEmitir.aEmitirLineas()
             },
             documentoAfectado = if (tipo.esNota) {
                 comprobanteAfectado?.let { inv ->
@@ -483,10 +643,14 @@ fun EmitirComprobanteScreen(
                 else -> null
             },
             observaciones = observaciones.takeIf { it.isNotBlank() },
-            almacenId = almacenId.takeIf { it.isNotBlank() },
+            almacenId = almEmitir.takeIf { it.isNotBlank() },
         )
-        guardando = true
-        scope.launch {
+            val lineasDevolucionPendientes = if (esNotaCredito && esDevolucionMercaderia) {
+                (if (acreditacionPorMonto) lineasNcConDescuento else lineasEmitir)
+                    .lineasParaIngresoDevolucion(almacenId)
+            } else {
+                emptyList()
+            }
             val result = withContext(Dispatchers.IO) {
                 ComprobanteRepository.emitir(ruc, token, request)
             }
@@ -494,11 +658,49 @@ fun EmitirComprobanteScreen(
             result.fold(
                 onSuccess = { invoice ->
                     val etiqueta = "${invoice.serie}-${invoice.correlativo}"
+                    var ingresoRegistrado: String? = null
+                    var ingresoError: String? = null
+                    if (
+                        esNotaCredito &&
+                        esDevolucionMercaderia &&
+                        almacenId.isNotBlank() &&
+                        lineasDevolucionPendientes.isNotEmpty() &&
+                        lineasDevolucionPendientes.lineasListasParaIngreso()
+                    ) {
+                        val entrada = construirEntradaDevolucionNotaCredito(
+                            companyRuc = ruc,
+                            almacenId = almacenId,
+                            lineasDevolucion = lineasDevolucionPendientes,
+                            notaCreditoId = invoice.id,
+                            etiquetaNotaCredito = etiqueta,
+                            comprobanteAfectadoId = comprobanteAfectado?.id,
+                            etiquetaComprobanteAfectado = comprobanteAfectado?.etiquetaCompleta,
+                            clienteSeleccionado = clienteSeleccionado,
+                            receptor = receptorEmitir,
+                        )
+                        val ingresoResult = withContext(Dispatchers.IO) {
+                            InventarioRepository.registrarEntrada(ruc, token, entrada)
+                        }
+                        ingresoResult.fold(
+                            onSuccess = { mov ->
+                                ingresoRegistrado = mov.numeroDisplay
+                            },
+                            onFailure = { err ->
+                                ingresoError = err.mensajeAuth()
+                            },
+                        )
+                    }
                     val mensaje = when {
                         invoice.sunatOk == false || invoice.success == false ->
                             invoice.sunatDescripcion
                                 ?: invoice.message
                                 ?: "$etiqueta rechazado por SUNAT"
+                        ingresoError != null ->
+                            buildString {
+                                append("$etiqueta registrada, pero no se pudo ingresar al almacén: $ingresoError")
+                            }
+                        ingresoRegistrado != null ->
+                            "$etiqueta aceptada. Ingreso $ingresoRegistrado registrado en almacén."
                         invoice.estado.name == "ACEPTADO" ->
                             "$etiqueta aceptado por SUNAT"
                         invoice.estado.name == "RECHAZADO" ->
@@ -542,8 +744,8 @@ fun EmitirComprobanteScreen(
         },
         onClienteSeleccionado = { cli ->
             clienteSeleccionado = cli
-            docReceptor = ""
-            nombreReceptor = ""
+            docReceptor = cli.numeroDoc
+            nombreReceptor = cli.razonSocial
             mostrarBuscarCliente = false
             busquedaCliente = ""
         },
@@ -560,6 +762,22 @@ fun EmitirComprobanteScreen(
             busquedaCatalogo = ""
         },
         onItemSeleccionado = { item ->
+            if (puedeElegirAlmacen && almacenId.isBlank()) {
+                Toast.makeText(
+                    context,
+                    "Elige el almacén de salida antes de agregar productos.",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                return@CatalogoBuscarSheet
+            }
+            if (esNotaCredito) {
+                Toast.makeText(
+                    context,
+                    "En nota de crédito solo puedes acreditar ítems del documento afectado",
+                    Toast.LENGTH_SHORT,
+                ).show()
+                return@CatalogoBuscarSheet
+            }
             if (esNotaFiscal) {
                 lineas = lineas.agregarDesdeCatalogo(
                     item,
@@ -595,16 +813,21 @@ fun EmitirComprobanteScreen(
         catalogItem = lineaSeries?.catalogItem,
         seriesIniciales = lineaSeries?.series.orEmpty(),
         seriesExcluidasIds = seriesExcluidasEnOtrasLineas,
+        seriesEntregadas = if (esNcDevolucionCantidad) {
+            lineaSeries?.catalogItemId?.let { seriesEntregadasPorItem[it].orEmpty() } ?: emptyList()
+        } else {
+            null
+        },
         onDismiss = { lineaSeriesLineaId = null },
         onConfirmar = { seleccionadas ->
             val lineaId = lineaSeries?.lineaId ?: return@SeleccionSeriesSheet
+            val almSalida = almacenId.takeIf { it.isNotBlank() }
             lineas = lineas.map { linea ->
                 if (linea.lineaId == lineaId) {
                     linea.copy(
                         series = seleccionadas,
                         numerosSerie = emptyList(),
-                        almacenId = almacenId.takeIf { it.isNotBlank() }
-                            ?: seleccionadas.firstOrNull()?.almacenId,
+                        almacenId = almSalida ?: seleccionadas.firstOrNull()?.almacenId,
                         cantidad = seleccionadas.size.toDouble(),
                     )
                 } else {
@@ -614,6 +837,38 @@ fun EmitirComprobanteScreen(
             lineaSeriesLineaId = null
         },
     )
+
+    if (mostrarDatePickerAfectado) {
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = fechaAfectadoElegida
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { mostrarDatePickerAfectado = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pickerState.selectedDateMillis?.let { millis ->
+                            fechaAfectadoElegida = Instant.ofEpochMilli(millis)
+                                .atZone(ZoneId.systemDefault())
+                                .toLocalDate()
+                        }
+                        presetPeriodoAfectado = PresetPeriodoComprobante.FECHA
+                        mostrarDatePickerAfectado = false
+                    },
+                ) { Text("Aplicar", color = C.accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { mostrarDatePickerAfectado = false }) {
+                    Text("Cancelar", color = C.textSecondary)
+                }
+            },
+        ) {
+            DatePicker(state = pickerState)
+        }
+    }
 
     AppEmitScaffold(
         modifier = modifier.fillMaxSize(),
@@ -655,108 +910,95 @@ fun EmitirComprobanteScreen(
             EmitSeccionCard(
                 icono = Icons.Default.Person,
                 titulo = "Datos del receptor",
-                subtitulo = if (esBoleta) {
-                    "Cliente registrado o consumidor final"
-                } else {
-                    "Cliente o destinatario del comprobante"
-                },
+                subtitulo = "Cliente registrado o datos manuales",
             ) {
-                if (esBoleta) {
-                    OutlinedButton(
-                        onClick = { mostrarBuscarCliente = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.5.dp, C.accent),
-                    ) {
-                        Icon(Icons.Default.Business, contentDescription = null, tint = C.accent)
-                        Spacer(modifier = Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = { mostrarBuscarCliente = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    border = BorderStroke(1.5.dp, C.accent),
+                ) {
+                    Icon(Icons.Default.Business, contentDescription = null, tint = C.accent)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Buscar cliente registrado",
+                        color = C.accent,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                clienteSeleccionado?.let { cli ->
+                    Spacer(modifier = Modifier.height(10.dp))
+                    EmitClienteSeleccionadoCard(
+                        nombre = cli.razonSocial,
+                        documento = cli.etiquetaDocumento,
+                        onQuitar = {
+                            clienteSeleccionado = null
+                            docReceptor = ""
+                            nombreReceptor = ""
+                        },
+                    )
+                    if ((esFactura || esNotaCredito) && !receptorValido) {
                         Text(
-                            "Buscar cliente registrado",
-                            color = C.accent,
-                            fontWeight = FontWeight.SemiBold,
+                            text = "El cliente seleccionado debe tener un RUC de 11 dígitos.",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(start = 2.dp, top = 8.dp),
                         )
                     }
-                    clienteSeleccionado?.let { cli ->
-                        Spacer(modifier = Modifier.height(10.dp))
-                        EmitClienteSeleccionadoCard(
-                            nombre = cli.razonSocial,
-                            documento = cli.etiquetaDocumento,
-                            onQuitar = {
-                                clienteSeleccionado = null
-                                docReceptor = ""
-                                nombreReceptor = ""
-                            },
-                        )
-                        if (esFactura && !receptorValido) {
-                            Text(
-                                text = "El cliente seleccionado debe tener un RUC de 11 dígitos.",
-                                color = MaterialTheme.colorScheme.error,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(start = 2.dp, top = 8.dp),
-                            )
-                        }
-                    } ?: run {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        EmitCampo(
-                            value = docReceptor,
-                            onValueChange = ::onDocReceptorChange,
-                            label = labelDocCliente,
-                            placeholder = if (esFactura) "Ej. 20123456789" else "Ej. 45678901",
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        )
-                        if (docReceptorInvalido) {
-                            Text(
-                                text = "La factura exige un RUC de 11 dígitos.",
-                                color = MaterialTheme.colorScheme.error,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(start = 2.dp, top = 4.dp),
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        EmitCampo(
-                            value = nombreReceptor,
-                            onValueChange = { nombreReceptor = it },
-                            label = labelNombre,
-                            placeholder = "Nombre o razón social",
-                        )
-                    }
-                } else {
+                } ?: run {
+                    Spacer(modifier = Modifier.height(10.dp))
                     EmitCampo(
                         value = docReceptor,
                         onValueChange = ::onDocReceptorChange,
                         label = labelDocCliente,
-                        placeholder = if (esNotaDebito) "RUC 11 dígitos o DNI 8 dígitos" else "Ej. 20123456789",
+                        placeholder = placeholderDocReceptor,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
                     if (docReceptorInvalido) {
                         Text(
                             text = when {
-                                esNotaDebito ->
+                                esNotaDebito || esGuiaEmision ->
                                     "Ingresa un RUC (11 dígitos) o DNI (8 dígitos) válido."
-                                else ->
+                                esBoleta ->
+                                    "La boleta exige un DNI de 8 dígitos."
+                                esNotaCredito ->
                                     "La nota de crédito exige un RUC de 11 dígitos."
+                                else ->
+                                    "La factura exige un RUC de 11 dígitos."
                             },
                             color = MaterialTheme.colorScheme.error,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(start = 2.dp, top = 4.dp),
                         )
-                    } else if (esNotaCredito && docReceptor.length in 1..10) {
-                        Text(
-                            text = "Ingresa el RUC completo (11 dígitos) del cliente.",
-                            fontSize = 12.sp,
-                            color = C.textSecondary,
-                            modifier = Modifier.padding(start = 2.dp, top = 4.dp),
-                        )
-                    }
-                    if (esNota && !esNotaCredito && docReceptor.length in listOf(8, 11) &&
-                        nombreReceptor.isBlank() && clientes.isEmpty()
-                    ) {
-                        Text(
-                            text = "Buscando cliente registrado…",
-                            fontSize = 12.sp,
-                            color = C.textSecondary,
-                            modifier = Modifier.padding(start = 2.dp, top = 4.dp),
-                        )
+                    } else {
+                        val doc = docReceptor.filter { it.isDigit() }
+                        when {
+                            esNotaCredito && doc.length in 1..10 -> {
+                                Text(
+                                    text = "Ingresa el RUC completo (11 dígitos) del cliente.",
+                                    fontSize = 12.sp,
+                                    color = C.textSecondary,
+                                    modifier = Modifier.padding(start = 2.dp, top = 4.dp),
+                                )
+                            }
+                            tipo.docReceptorListo(doc) && clientes.isEmpty() -> {
+                                Text(
+                                    text = "Buscando cliente registrado…",
+                                    fontSize = 12.sp,
+                                    color = C.textSecondary,
+                                    modifier = Modifier.padding(start = 2.dp, top = 4.dp),
+                                )
+                            }
+                            tipo.docReceptorListo(doc) &&
+                                clientes.buscarPorDocumento(doc) == null -> {
+                                Text(
+                                    text = "Cliente no registrado. Ingresa el nombre manualmente.",
+                                    fontSize = 12.sp,
+                                    color = C.textSecondary,
+                                    modifier = Modifier.padding(start = 2.dp, top = 4.dp),
+                                )
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(10.dp))
                     EmitCampo(
@@ -764,16 +1006,7 @@ fun EmitirComprobanteScreen(
                         onValueChange = { nombreReceptor = it },
                         label = labelNombre,
                         placeholder = "Nombre o razón social",
-                        readOnly = esNota && clienteSeleccionado != null,
                     )
-                    if (esNota && clienteSeleccionado != null) {
-                        Text(
-                            text = "Nombre cargado del cliente registrado.",
-                            fontSize = 12.sp,
-                            color = C.accent,
-                            modifier = Modifier.padding(start = 2.dp, top = 4.dp),
-                        )
-                    }
                 }
             }
 
@@ -843,11 +1076,21 @@ fun EmitirComprobanteScreen(
                     icono = if (esNotaDebito) Icons.Default.Add else Icons.AutoMirrored.Filled.Undo,
                     titulo = "Documento afectado",
                     subtitulo = when {
-                        esNotaCredito -> "Busca la factura afectada y carga sus ítems"
-                        esNotaDebito -> "Busca la factura o boleta afectada"
+                        esNotaCredito -> "Facturas del periodo seleccionado · filtra por número o cliente"
+                        esNotaDebito -> "Comprobantes del periodo · filtra por número o cliente"
                         else -> "Comprobante original y motivo"
                     },
                 ) {
+                    ComprobanteAfectadoPeriodoFiltros(
+                        preset = presetPeriodoAfectado,
+                        onPreset = { presetPeriodoAfectado = it },
+                        onElegirFecha = { mostrarDatePickerAfectado = true },
+                        hoy = hoyComprobantes,
+                        fechaElegida = fechaAfectadoElegida,
+                        cantidadVisible = sugerenciasComprobante.size,
+                        cargando = cargandoComprobantes,
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
                     ComprobanteAfectadoBuscarField(
                         value = docReferencia,
                         onValueChange = { docReferencia = it },
@@ -858,10 +1101,22 @@ fun EmitirComprobanteScreen(
                         onLimpiarSeleccion = { limpiarComprobanteAfectado() },
                         label = if (esNotaDebito) "Comprobante afectado" else "Factura afectada",
                         placeholder = if (esNotaDebito) {
-                            "Busca factura F001, boleta B001 o cliente…"
+                            "Ej. 1234, B001-1234 o nombre del cliente…"
                         } else {
-                            "Busca por serie F001, número o cliente…"
+                            "Ej. 1234 (solo número) o F001-1234…"
                         },
+                        tituloSugerencias = when {
+                            docReferencia.isNotBlank() && esNotaDebito -> "Comprobantes"
+                            docReferencia.isNotBlank() -> "Facturas"
+                            esNotaDebito -> "Comprobantes del cliente"
+                            else -> "Facturas del cliente"
+                        },
+                        mensajeSinCoincidencias = if (esNotaDebito) {
+                            "Sin comprobantes que coincidan con tu búsqueda."
+                        } else {
+                            "Sin facturas que coincidan con tu búsqueda."
+                        },
+                        docClienteListo = tipo.docReceptorListo(docReceptorEfectivo),
                     )
                     if (docReferenciaValida && lineas.isNotEmpty()) {
                         Text(
@@ -878,20 +1133,47 @@ fun EmitirComprobanteScreen(
                             modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
                         )
                     } else if (sugerenciasComprobante.isEmpty() && !cargandoComprobantes) {
-                        val doc = docReceptor.filter { it.isDigit() }
-                        val docListo = if (esNotaDebito) doc.length in listOf(8, 11) else doc.length == 11
-                        if (docListo) {
-                            Text(
-                                text = if (esNotaDebito) {
-                                    "No hay comprobantes aceptados para este documento."
-                                } else {
-                                    "No hay facturas aceptadas para este RUC."
-                                },
-                                fontSize = 12.sp,
-                                color = C.textSecondary,
-                                lineHeight = 17.sp,
-                                modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
-                            )
+                        when {
+                            tipo.docReceptorListo(docReceptorEfectivo) -> {
+                                Text(
+                                    text = if (esNotaDebito) {
+                                        "No hay comprobantes en este periodo para este documento."
+                                    } else {
+                                        "No hay facturas en este periodo para este RUC."
+                                    },
+                                    fontSize = 12.sp,
+                                    color = C.textSecondary,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                                )
+                            }
+                            docReferencia.isBlank() -> {
+                                Text(
+                                    text = "No hay comprobantes en el periodo seleccionado. Amplía el rango o busca por número.",
+                                    fontSize = 12.sp,
+                                    color = C.textSecondary,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                                )
+                            }
+                        }
+                        when (presetPeriodoAfectado) {
+                            PresetPeriodoComprobante.HOY -> {
+                                TextButton(onClick = { presetPeriodoAfectado = PresetPeriodoComprobante.ULTIMOS_7 }) {
+                                    Text("Ampliar a últimos 7 días", color = C.accent)
+                                }
+                            }
+                            PresetPeriodoComprobante.AYER -> {
+                                TextButton(onClick = { presetPeriodoAfectado = PresetPeriodoComprobante.ULTIMOS_7 }) {
+                                    Text("Ampliar a últimos 7 días", color = C.accent)
+                                }
+                            }
+                            PresetPeriodoComprobante.ULTIMOS_7 -> {
+                                TextButton(onClick = { presetPeriodoAfectado = PresetPeriodoComprobante.ESTE_MES }) {
+                                    Text("Ampliar a este mes", color = C.accent)
+                                }
+                            }
+                            else -> Unit
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -906,6 +1188,24 @@ fun EmitirComprobanteScreen(
                                 text = hint,
                                 fontSize = 12.sp,
                                 color = C.textSecondary,
+                                lineHeight = 17.sp,
+                            )
+                        }
+                        MotivosNotaCreditoSunat.hintDevolucion(motivoCodigoNc)?.let { hint ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = hint,
+                                fontSize = 12.sp,
+                                color = C.accent,
+                                lineHeight = 17.sp,
+                            )
+                        }
+                        if (esDevolucionMercaderia && almacenId.isBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Asigna un almacén a tu usuario para registrar el ingreso automático.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.error,
                                 lineHeight = 17.sp,
                             )
                         }
@@ -927,7 +1227,24 @@ fun EmitirComprobanteScreen(
                 }
             }
 
+            if (puedeElegirAlmacen) {
+                EmitirAlmacenOrigenCard(
+                    almacenes = almacenes,
+                    seleccionadoId = almacenSeleccionadoId,
+                    cargando = cargandoAlmacenes,
+                    onSeleccionar = ::onAlmacenOrigenChange,
+                )
+            }
+
             if (!esGuiaEmision) {
+                val subtituloDetalle = buildString {
+                    append("${lineas.size} línea(s) · catálogo")
+                    if (!puedeElegirAlmacen) {
+                        val nombreAlm = usuario?.almacenNombre?.takeIf { it.isNotBlank() }
+                            ?: almacenes.find { it.id == almacenId }?.nombre
+                        if (!nombreAlm.isNullOrBlank()) append(" · $nombreAlm")
+                    }
+                }
                 EmitSeccionCard(
                     icono = Icons.Default.ShoppingCart,
                     titulo = when {
@@ -935,7 +1252,7 @@ fun EmitirComprobanteScreen(
                         esNotaDebito -> "Ítems a debitar"
                         else -> "Detalle de venta"
                     },
-                    subtitulo = "${lineas.size} línea(s) · catálogo",
+                    subtitulo = subtituloDetalle,
                     trailing = {
                         if (lineas.isNotEmpty()) {
                             Surface(
@@ -966,7 +1283,7 @@ fun EmitirComprobanteScreen(
                                 esNotaDebito && !ajustePorItemsNd ->
                                     "Agrega líneas del catálogo con el monto del cargo (intereses, penalidad…)"
                                 esNotaFiscal ->
-                                    "Esperando líneas del comprobante o catálogo"
+                                    "Ajusta cantidades o montos de los ítems del documento afectado"
                                 else ->
                                     "Agrega productos o servicios del catálogo"
                             },
@@ -1675,7 +1992,7 @@ private fun LineaItemCard(
                 }
                 if (!linea.seriesValidas()) {
                     Text(
-                        text = "Toca el botón para elegir series del almacén",
+                        text = "Elige las series del almacén de salida seleccionado",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(top = 4.dp),
@@ -1717,7 +2034,7 @@ private fun LineaItemCard(
                         EmitStepperCantidad(
                             cantidad = linea.cantidad,
                             cantidadTexto = cantidadTexto,
-                            maxCantidad = if (validaStock) maxCantidad else null,
+                            maxCantidad = maxCantidad,
                             onCantidadTextoChange = { texto ->
                                 val filtrado = texto.filter { c -> c.isDigit() || c == '.' }
                                 if (filtrado.isEmpty()) {
@@ -1737,7 +2054,11 @@ private fun LineaItemCard(
                                 cantidadTexto = formatCantidad(ajustada)
                                 onCantidadChange(ajustada)
                             },
-                            puedeIncrementar = !validaStock || item.hayStockParaEmision(linea.cantidad + 1.0),
+                            puedeIncrementar = when {
+                                maxCantidad != null -> linea.cantidad + 1.0 <= maxCantidad + 0.009
+                                validaStock -> item.hayStockParaEmision(linea.cantidad + 1.0)
+                                else -> true
+                            },
                             onMenos = {
                                 val nueva = (linea.cantidad - 1.0).coerceAtLeast(0.0)
                                 if (nueva <= 0) onEliminar()

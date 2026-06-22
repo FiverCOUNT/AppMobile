@@ -2,6 +2,7 @@ package com.factapp.jhonny.network
 
 import com.factapp.jhonny.network.dto.ordenadosPorFechaEmisionReciente
 import com.factapp.jhonny.network.dto.model.Invoice
+import com.factapp.jhonny.network.dto.model.SeriesComprobanteItem
 import com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest
 import java.time.LocalDate
 
@@ -44,6 +45,18 @@ object ComprobanteRepository {
         RetrofitClient.api.listarCompras(companyRuc, bearer(authToken))
             .map { it.normalizado() }
             .ordenadosPorFechaEmisionReciente()
+    }
+
+    suspend fun listarSeriesEntregadas(
+        companyRuc: String,
+        token: String?,
+        comprobanteId: String,
+    ): Result<List<SeriesComprobanteItem>> = apiCall(companyRuc, token, "consultar series entregadas") { authToken ->
+        RetrofitClient.api.listarSeriesEntregadasComprobante(
+            companyRuc,
+            comprobanteId,
+            bearer(authToken),
+        )
     }
 
     suspend fun descargarArchivo(

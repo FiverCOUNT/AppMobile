@@ -1,5 +1,6 @@
 package com.factapp.jhonny.network.dto.model
 
+import com.factapp.jhonny.TipoComprobante
 import com.google.gson.annotations.SerializedName
 
 /** Cliente / receptor persistido (API `GET/POST …/clientes`). En boletas → [Invoice.cliente]; UBL → [Company] vía [aCompany]. */
@@ -50,3 +51,15 @@ fun dniValido(numero: String): Boolean =
 
 /** Clientes válidos como receptor de boleta (sin RUC / empresa). */
 fun List<Cliente>.aptosParaBoleta(): List<Cliente> = filter { !it.esEmpresa }
+
+fun Cliente.esAptoReceptor(tipo: TipoComprobante): Boolean = when (tipo) {
+    TipoComprobante.BOLETA -> !esEmpresa
+    TipoComprobante.FACTURA, TipoComprobante.NOTA_CREDITO -> esEmpresa
+    else -> true
+}
+
+fun List<Cliente>.aptosParaComprobante(tipo: TipoComprobante): List<Cliente> = when (tipo) {
+    TipoComprobante.BOLETA -> aptosParaBoleta()
+    TipoComprobante.FACTURA, TipoComprobante.NOTA_CREDITO -> filter { it.esEmpresa }
+    else -> this
+}

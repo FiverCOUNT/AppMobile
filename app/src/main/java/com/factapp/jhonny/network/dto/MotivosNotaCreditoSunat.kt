@@ -62,10 +62,20 @@ object MotivosNotaCreditoSunat {
   fun esAcreditacionPorMonto(codigo: String?): Boolean =
     codigo in setOf("04", "05", "09")
 
+  /** Devolución de mercadería al almacén (ingreso automático tras emitir la NC). */
+  fun esDevolucionMercaderia(codigo: String?): Boolean =
+    codigo in setOf("06", "07")
+
   fun hintAcreditacion(codigo: String?): String? = when (codigo) {
     "04" -> "Indica el monto total del descuento global (con IGV) en cada línea o una sola línea."
-    "05" -> "Por cada ítem indica el precio nuevo por unidad (con IGV). La cantidad es cuántas unidades reciben ese descuento."
+    "05" -> "Por cada ítem indica el precio nuevo por unidad (con IGV), menor al facturado. Quita las líneas sin descuento."
     "09" -> "Indica el monto a reducir por unidad (con IGV) respecto al precio facturado."
+    else -> null
+  }
+
+  fun hintDevolucion(codigo: String?): String? = when (codigo) {
+    "06" -> "Al emitir, toda la mercadería devuelta ingresará automáticamente a tu almacén."
+    "07" -> "Al emitir, los ítems devueltos ingresarán automáticamente a tu almacén."
     else -> null
   }
 }

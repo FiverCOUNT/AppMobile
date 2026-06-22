@@ -8,6 +8,8 @@ import com.factapp.jhonny.network.dto.model.MovimientoTipo
 import com.factapp.jhonny.network.dto.model.sanitizarDesdeApi
 import com.factapp.jhonny.network.dto.model.ProductoDevolucionCliente
 import com.factapp.jhonny.network.dto.model.ProductoSerie
+import com.factapp.jhonny.network.dto.model.delAlmacen
+import com.factapp.jhonny.network.dto.model.soloDisponiblesParaEmision
 import com.factapp.jhonny.network.dto.model.UbicacionProducto
 import com.factapp.jhonny.network.dto.request.CrearAlmacenRequest
 import com.factapp.jhonny.network.dto.request.RegistrarEntradaRequest
@@ -70,7 +72,9 @@ object InventarioRepository {
             catalogItemId = catalogItemId,
             authorization = bearer(authToken),
             almacenId = almacenId?.takeIf { it.isNotBlank() },
-        )
+        ).filter { it.id.isNotBlank() || it.numeroSerie.isNotBlank() }
+            .soloDisponiblesParaEmision(almacenId)
+            .delAlmacen(almacenId)
     }
 
     suspend fun listarProductosDevolucion(

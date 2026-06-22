@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -50,8 +51,11 @@ import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.network.InventarioRepository
 import com.factapp.jhonny.network.dto.model.CatalogItem
 import com.factapp.jhonny.network.dto.model.ProductoSerie
+import com.factapp.jhonny.network.dto.model.ProductoSerieEstado
+import com.factapp.jhonny.network.dto.model.delAlmacen
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private val C = ComprobanteEmitColors
@@ -68,6 +72,8 @@ fun SeleccionSeriesSheet(
     catalogItem: CatalogItem?,
     seriesIniciales: List<ProductoSerie>,
     seriesExcluidasIds: Set<String> = emptySet(),
+    /** Si se indica, solo se muestran estas series (p. ej. devolución NC) en lugar del stock disponible. */
+    seriesEntregadas: List<ProductoSerie>? = null,
     onDismiss: () -> Unit,
     onConfirmar: (List<ProductoSerie>) -> Unit,
 ) {
@@ -79,11 +85,15 @@ fun SeleccionSeriesSheet(
     val seleccionadas = remember(catalogItem.id) { mutableStateListOf<String>() }
     var busquedaSeries by remember(catalogItem.id) { mutableStateOf("") }
     var filtroLista by remember(catalogItem.id) { mutableStateOf(FiltroSeriesLista.TODAS) }
+    val modoDevolucion = seriesEntregadas != null
 
     val idsSeleccionados = seleccionadas.toList()
-    val seriesFiltradas = remember(disponibles, busquedaSeries, filtroLista, idsSeleccionados, seriesExcluidasIds) {
+    val seriesFiltradas = remember(disponibles, busquedaSeries, filtroLista, idsSeleccionados, seriesExcluidasIds, modoDevolucion) {
         disponibles.filter { serie ->
             if (seriesExcluidasIds.contains(serie.id) && !seleccionadas.contains(serie.id)) return@filter false
+            if (!modoDevolucion && serie.estado != ProductoSerieEstado.DISPONIBLE) {
+                return@filter false
+            }
             val coincideBusqueda = busquedaSeries.isBlank() ||
                 serie.numeroSerie.contains(busquedaSeries.trim(), ignoreCase = true)
             val coincideFiltro = when (filtroLista) {
@@ -94,25 +104,32 @@ fun SeleccionSeriesSheet(
         }
     }
 
-    LaunchedEffect(catalogItem.id, visible, almacenId) {
+    suspend fun cargarDisponibles(): List<ProductoSerie> {
+        if (modoDevolucion) return seriesEntregadas.orEmpty()
+        if (almacenId.isBlank()) return emptyList()
+        return withContext(Dispatchers.IO) {
+            InventarioRepository.listarSeriesDisponibles(
+                companyRuc = companyRuc,
+                catalogItemId = catalogItem.id,
+                token = token,
+                almacenId = almacenId,
+            ).getOrElse { emptyList() }
+        }.delAlmacen(almacenId)
+            .filter { !seriesExcluidasIds.contains(it.id) }
+    }
+
+    LaunchedEffect(catalogItem.id, visible, almacenId, seriesEntregadas, seriesExcluidasIds) {
         if (!visible) return@LaunchedEffect
         cargando = true
         busquedaSeries = ""
         filtroLista = FiltroSeriesLista.TODAS
+        val lista = cargarDisponibles()
+        disponibles = lista
+        val idsValidos = lista.map { it.id }.toSet()
         seleccionadas.clear()
-        seleccionadas.addAll(seriesIniciales.map { it.id })
-        disponibles = if (almacenId.isBlank()) {
-            emptyList()
-        } else {
-            withContext(Dispatchers.IO) {
-                InventarioRepository.listarSeriesDisponibles(
-                    companyRuc = companyRuc,
-                    catalogItemId = catalogItem.id,
-                    token = token,
-                    almacenId = almacenId,
-                ).getOrElse { emptyList() }
-            }
-        }
+        seleccionadas.addAll(
+            seriesIniciales.map { it.id }.filter { idsValidos.contains(it) },
+        )
         cargando = false
     }
 
@@ -125,7 +142,7 @@ fun SeleccionSeriesSheet(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             ComprobanteEmitHeader(
-                titulo = "Series disponibles",
+                titulo = if (modoDevolucion) "Series entregadas" else "Series disponibles",
                 subtitulo = catalogItem.nombre,
                 onVolver = onDismiss,
                 mostrarDragHandle = true,
@@ -136,10 +153,10 @@ fun SeleccionSeriesSheet(
                     .padding(horizontal = 20.dp)
                     .padding(bottom = 24.dp),
             ) {
-                if (almacenId.isBlank()) {
+                if (!modoDevolucion && almacenId.isBlank()) {
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        "Tu usuario no tiene almacén asignado. Asigna un almacén para elegir series.",
+                        "Elige primero el almacén de salida para ver las series de esa bodega.",
                         color = C.textSecondary,
                         fontSize = 13.sp,
                     )
@@ -195,7 +212,11 @@ fun SeleccionSeriesSheet(
                         CircularProgressIndicator(color = C.accent)
                     }
                     disponibles.isEmpty() -> Text(
-                        "No hay series disponibles en este almacén.",
+                        if (modoDevolucion) {
+                            "No hay series entregadas al cliente para este producto en el documento afectado."
+                        } else {
+                            "No hay series disponibles en este almacén."
+                        },
                         color = C.textSecondary,
                         fontSize = 13.sp,
                         modifier = Modifier.padding(vertical = 8.dp),
@@ -250,14 +271,24 @@ fun SeleccionSeriesSheet(
                 Spacer(Modifier.height(12.dp))
                 Button(
                     onClick = {
-                        onConfirmar(disponibles.filter { seleccionadas.contains(it.id) })
+                        val alm = almacenId.takeIf { it.isNotBlank() }
+                        val confirmadas = seleccionadas.mapNotNull { id ->
+                            disponibles.find { it.id == id }?.let { serie ->
+                                if (alm != null) serie.copy(almacenId = alm) else serie
+                            }
+                        }
+                        if (confirmadas.isEmpty()) return@Button
+                        onConfirmar(confirmadas)
                     },
-                    enabled = seleccionadas.isNotEmpty(),
+                    enabled = seleccionadas.isNotEmpty() && !cargando,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = C.accent),
                 ) {
-                    Text("Confirmar ${seleccionadas.size} serie(s)", fontWeight = FontWeight.Bold)
+                    Text(
+                        "Confirmar ${seleccionadas.size} serie(s)",
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         }

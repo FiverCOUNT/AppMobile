@@ -1,6 +1,7 @@
 package com.factapp.jhonny.network.dto
 
 import com.factapp.jhonny.network.dto.model.CatalogItem
+import com.factapp.jhonny.network.dto.model.CatalogItemKind
 import com.factapp.jhonny.network.dto.model.LineaCatalogoItem
 import com.factapp.jhonny.network.dto.model.ProductoSerie
 import com.factapp.jhonny.network.dto.model.lineaCatalogoConSerie
@@ -94,6 +95,10 @@ fun CatalogItem.disponibleParaIngreso(): Boolean =
 fun CatalogItem.disponibleParaDevolucionCliente(): Boolean =
     activo && esProducto && manejaStock
 
+/** NC devolución de mercadería: solo productos con stock por cantidad o por serie. */
+fun CatalogItem.aplicaIngresoDevolucionNotaCredito(): Boolean =
+    esProducto && (manejaInventario || usaSeriesInventario)
+
 fun CatalogItem.disponibleParaSalida(): Boolean =
     disponibleParaIngreso() && stockDisponible > 0
 
@@ -109,3 +114,9 @@ fun ProductoSerie.aRegistrarMovimientoLineaRequest(
     cantidad = cantidad,
     serieIds = listOf(id),
 )
+
+fun LineaCatalogoItem.aplicaIngresoDevolucionNotaCredito(): Boolean {
+    catalogItem?.let { return it.aplicaIngresoDevolucionNotaCredito() }
+    if (kind?.uppercase() == CatalogItemKind.SERVICE.name) return false
+    return manejaStock == true || manejaSerieEfectivo
+}

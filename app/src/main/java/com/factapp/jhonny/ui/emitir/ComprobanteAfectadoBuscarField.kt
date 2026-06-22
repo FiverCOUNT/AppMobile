@@ -42,6 +42,9 @@ fun ComprobanteAfectadoBuscarField(
     modifier: Modifier = Modifier,
     label: String = "Factura afectada",
     placeholder: String = "Busca por serie F001, número o cliente…",
+    tituloSugerencias: String = "Facturas",
+    mensajeSinCoincidencias: String = "Sin facturas que coincidan con tu búsqueda.",
+    docClienteListo: Boolean = false,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         OutlinedTextField(
@@ -82,9 +85,17 @@ fun ComprobanteAfectadoBuscarField(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(top = 6.dp, start = 2.dp),
             )
+        } else if (docClienteListo && value.isBlank() && sugerencias.isNotEmpty()) {
+            Text(
+                text = "Selecciona un comprobante de la lista o refina la búsqueda.",
+                fontSize = 12.sp,
+                color = C.accent,
+                lineHeight = 17.sp,
+                modifier = Modifier.padding(top = 6.dp, start = 2.dp),
+            )
         } else if (value.isNotBlank() && sugerencias.isEmpty() && !cargando) {
             Text(
-                text = "Sin facturas que coincidan. Verifica el RUC o la serie.",
+                text = mensajeSinCoincidencias,
                 fontSize = 12.sp,
                 color = C.textSecondary,
                 lineHeight = 17.sp,
@@ -100,7 +111,7 @@ fun ComprobanteAfectadoBuscarField(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
-                    text = "Facturas",
+                    text = tituloSugerencias,
                     fontSize = 12.sp,
                     color = C.textSecondary,
                     fontWeight = FontWeight.Medium,

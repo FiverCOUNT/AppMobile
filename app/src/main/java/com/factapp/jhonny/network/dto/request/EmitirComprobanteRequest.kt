@@ -39,4 +39,9 @@ data class EmitirLineaRequest(
     /** IDs de series vendidas/despachadas en esta linea. */
     @SerializedName("serie_ids")
     val serieIds: List<String>? = null,
+    /** Números de serie (el backend valida por id y/o por SN). */
+    @SerializedName("series")
+    val series: List<String>? = null,
+    @SerializedName("numeros_serie")
+    val numerosSerie: List<String>? = null,
 )

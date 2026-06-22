@@ -14,6 +14,12 @@ data class RegistrarEntradaRequest(
     @SerializedName("cliente_id")
     val clienteId: String? = null,
     val cliente: MovimientoCliente? = null,
+    @SerializedName("referencia_tipo")
+    val referenciaTipo: String? = null,
+    @SerializedName("referencia_id")
+    val referenciaId: String? = null,
+    @SerializedName("comprobante_id")
+    val comprobanteId: String? = null,
 ) {
     /** Payload enviado al API (RUC va en la URL). */
     fun toApiBody(): RegistrarEntradaApiBody = RegistrarEntradaApiBody(
@@ -22,6 +28,9 @@ data class RegistrarEntradaRequest(
         observaciones = observaciones,
         clienteId = clienteId,
         cliente = cliente,
+        referenciaTipo = referenciaTipo,
+        referenciaId = referenciaId,
+        comprobanteId = comprobanteId,
     )
 }
 
@@ -34,6 +43,12 @@ data class RegistrarEntradaApiBody(
     @SerializedName("cliente_id")
     val clienteId: String? = null,
     val cliente: MovimientoCliente? = null,
+    @SerializedName("referencia_tipo")
+    val referenciaTipo: String? = null,
+    @SerializedName("referencia_id")
+    val referenciaId: String? = null,
+    @SerializedName("comprobante_id")
+    val comprobanteId: String? = null,
 )
 
 /**
