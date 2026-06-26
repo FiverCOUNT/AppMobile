@@ -1,6 +1,7 @@
 package com.factapp.jhonny.ui.inventario
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Tag
@@ -77,6 +79,7 @@ data class MovimientoDetalleCampoUi(
     val valor: String,
     val icono: ImageVector = Icons.Default.Tag,
     val valorSecundario: Boolean = false,
+    val onClick: (() -> Unit)? = null,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -400,9 +403,17 @@ private fun MovimientoProductosSection(lineas: List<MovimientoDetalleLineaUi>, t
 @Composable
 private fun MovimientoDetalleFila(campo: MovimientoDetalleCampoUi, tint: Color) {
     val color = if (campo.valorSecundario) C.textSecondary else tint
+    val clickable = campo.onClick != null
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (clickable) {
+                    Modifier.clickable(onClick = campo.onClick!!)
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.Top,
     ) {
@@ -421,9 +432,19 @@ private fun MovimientoDetalleFila(campo: MovimientoDetalleCampoUi, tint: Color) 
             Text(
                 campo.valor,
                 fontSize = 14.sp,
-                color = if (campo.valorSecundario) C.textSecondary else C.textPrimary,
+                color = if (campo.valorSecundario) C.textSecondary else if (clickable) tint else C.textPrimary,
                 fontWeight = FontWeight.SemiBold,
                 lineHeight = 19.sp,
+            )
+        }
+        if (clickable) {
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .size(20.dp),
             )
         }
     }

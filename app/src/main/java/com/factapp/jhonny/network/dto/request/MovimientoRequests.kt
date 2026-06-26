@@ -79,8 +79,8 @@ data class RegistrarMovimientoLineaRequest(
     @SerializedName("catalog_item_id")
     val catalogItemId: String,
     val cantidad: Double,
-    @SerializedName("series")
-    val numerosSerie: List<String>? = null,
-    @SerializedName("serie_ids")
-    val serieIds: List<String>? = null,
+    @SerializedName("producto_serie_id")
+    val productoSerieId: String? = null,
+    @SerializedName("numero_serie")
+    val numeroSerie: String? = null,
 )

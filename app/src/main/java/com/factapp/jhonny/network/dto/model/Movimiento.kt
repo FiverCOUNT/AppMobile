@@ -63,8 +63,6 @@ fun Movimiento.sanitizarDesdeApi(): Movimiento = copy(
 fun LineaCatalogoItem.sanitizarDesdeApi(): LineaCatalogoItem = copy(
     catalogItemId = catalogItemId ?: "",
     cantidad = cantidad ?: 0.0,
-    numerosSerie = numerosSerie ?: emptyList(),
-    series = series ?: emptyList(),
 )
 
 fun Movimiento.etiquetaGuiaRemision(): String? =

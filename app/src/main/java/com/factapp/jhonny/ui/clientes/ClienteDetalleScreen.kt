@@ -74,6 +74,7 @@ fun ClienteDetalleScreen(
     usuario: Usuario? = null,
     onVolver: () -> Unit = {},
     onNuevaEntrega: (Cliente) -> Unit = {},
+    onAbrirComprobanteVenta: (String) -> Unit = {},
 ) {
     val companyRuc = usuario.companyRucParaCatalogo().orEmpty()
     val token = usuario?.token
@@ -244,6 +245,7 @@ fun ClienteDetalleScreen(
         catalogo = catalogoMap,
         almacenes = almacenesMap,
         onDismiss = { movimientoDetalle = null },
+        onAbrirComprobanteVenta = onAbrirComprobanteVenta,
     )
 
     ClienteContactoSheet(

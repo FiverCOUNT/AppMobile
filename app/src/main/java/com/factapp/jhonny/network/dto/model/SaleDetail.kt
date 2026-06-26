@@ -36,6 +36,8 @@ data class SaleDetail(
     val porcentajeIgv: Double? = null,
     @SerializedName(value = "producto_serie", alternate = ["serie"])
     val productoSerie: ProductoSerie? = null,
+    /** ACTIVO | DEVUELTO | ACREDITADO — control de reutilización en notas de crédito. */
+    val estado: String? = "ACTIVO",
 ) {
     private companion object {
         private const val IGV_RATE = 0.18
@@ -69,3 +71,6 @@ fun SaleDetail.textoEnComprobante(): String {
     descripcion?.takeIf { it.isNotBlank() }?.let { return it }
     return ""
 }
+
+fun SaleDetail.estaDisponibleParaNotaCredito(): Boolean =
+    estado.isNullOrBlank() || estado.equals("ACTIVO", ignoreCase = true)

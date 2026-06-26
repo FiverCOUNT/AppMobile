@@ -1,6 +1,7 @@
 package com.factapp.jhonny.ui.inventario
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Input
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Person
@@ -57,6 +58,7 @@ fun HistorialMovimientoDetalleSheet(
     catalogo: Map<String, CatalogItem>,
     almacenes: Map<String, Almacen>,
     onDismiss: () -> Unit,
+    onAbrirComprobanteVenta: (String) -> Unit = {},
 ) {
     if (movimiento == null) return
 
@@ -95,8 +97,18 @@ fun HistorialMovimientoDetalleSheet(
             movimiento.referenciaTipo?.let {
                 add(MovimientoDetalleCampoUi("Referencia", it.replace('_', ' '), Icons.Default.Tag))
             }
-            movimiento.comprobanteId?.let {
-                add(MovimientoDetalleCampoUi("Comprobante venta", it, Icons.Default.Tag))
+            movimiento.comprobanteId?.let { id ->
+                add(
+                    MovimientoDetalleCampoUi(
+                        etiqueta = "Comprobante venta",
+                        valor = "Ver en comprobantes emitidos",
+                        icono = Icons.Default.Description,
+                        onClick = {
+                            onDismiss()
+                            onAbrirComprobanteVenta(id)
+                        },
+                    ),
+                )
             }
             movimiento.etiquetaGuiaRemision()?.let { guia ->
                 add(MovimientoDetalleCampoUi("Guía de remisión", guia, Icons.Default.LocalShipping))

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.network.dto.etiquetaTipo
 import com.factapp.jhonny.network.dto.formatearSoles
 import com.factapp.jhonny.network.dto.model.Invoice
+import com.factapp.jhonny.network.dto.model.cantidadLineasActivasNotaCredito
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 
 private val C = ComprobanteEmitColors
@@ -45,6 +46,7 @@ fun ComprobanteAfectadoBuscarField(
     tituloSugerencias: String = "Facturas",
     mensajeSinCoincidencias: String = "Sin facturas que coincidan con tu búsqueda.",
     docClienteListo: Boolean = false,
+    mostrarLineasDisponiblesNc: Boolean = false,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         OutlinedTextField(
@@ -121,6 +123,7 @@ fun ComprobanteAfectadoBuscarField(
                     ComprobanteAfectadoSugerenciaCard(
                         comprobante = doc,
                         onClick = { onSeleccionar(doc) },
+                        mostrarLineasDisponiblesNc = mostrarLineasDisponiblesNc,
                     )
                 }
             }
@@ -132,6 +135,7 @@ fun ComprobanteAfectadoBuscarField(
 private fun ComprobanteAfectadoSugerenciaCard(
     comprobante: Invoice,
     onClick: () -> Unit,
+    mostrarLineasDisponiblesNc: Boolean = false,
 ) {
     Card(
         modifier = Modifier
@@ -171,7 +175,12 @@ private fun ComprobanteAfectadoSugerenciaCard(
                     maxLines = 1,
                 )
                 Text(
-                    text = "${comprobante.etiquetaTipo()} · ${comprobante.details.size} ítem(s)",
+                    text = buildString {
+                        append("${comprobante.etiquetaTipo()} · ${comprobante.details.size} ítem(s)")
+                        if (mostrarLineasDisponiblesNc) {
+                            append(" · ${comprobante.cantidadLineasActivasNotaCredito()} disponible(s)")
+                        }
+                    },
                     fontSize = 11.sp,
                     color = C.textSecondary,
                 )

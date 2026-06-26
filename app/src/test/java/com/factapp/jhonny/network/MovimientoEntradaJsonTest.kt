@@ -6,6 +6,7 @@ import com.factapp.jhonny.network.dto.model.Movimiento
 import com.factapp.jhonny.network.dto.model.MovimientoTipo
 import com.factapp.jhonny.network.dto.model.fechaLegible
 import com.factapp.jhonny.network.dto.model.sanitizarDesdeApi
+import com.factapp.jhonny.network.dto.model.serieEnMovimiento
 import com.google.gson.GsonBuilder
 import com.google.gson.reflect.TypeToken
 import org.junit.Assert.assertEquals
@@ -39,10 +40,22 @@ class MovimientoEntradaJsonTest {
                   "catalog_item_id": "9e2d5841-815a-4616-81af-7106901add50",
                   "nombre": "Pc",
                   "unidad": "NIU",
-                  "cantidad": 2,
-                  "series": ["SN-TEST-001", "SN-TEST-002"],
-                  "numeros_serie": ["SN-TEST-001", "SN-TEST-002"],
-                  "serie_ids": ["f564792c-365f-4022-b2aa-8eb25174e463"]
+                  "cantidad": 1,
+                  "producto_serie": {
+                    "id": "f564792c-365f-4022-b2aa-8eb25174e463",
+                    "numero_serie": "SN-TEST-001"
+                  }
+                },
+                {
+                  "linea_id": "6fc6ce08-7ab2-55c6-9d7e-7831dbe0dd4",
+                  "catalog_item_id": "9e2d5841-815a-4616-81af-7106901add50",
+                  "nombre": "Pc",
+                  "unidad": "NIU",
+                  "cantidad": 1,
+                  "producto_serie": {
+                    "id": "a675803d-4760-5133-c3bb-9fc36285f574",
+                    "numero_serie": "SN-TEST-002"
+                  }
                 }
               ]
             }
@@ -52,8 +65,11 @@ class MovimientoEntradaJsonTest {
         assertEquals(MovimientoTipo.ENTRADA, mov.tipo)
         assertEquals("MOV-0001", mov.numero)
         assertEquals(1780979169524L, mov.fecha)
-        assertEquals(1, mov.lineas.size)
-        assertEquals(listOf("SN-TEST-001", "SN-TEST-002"), mov.lineas.first().numerosSerieUi)
+        assertEquals(2, mov.lineas.size)
+        assertEquals(
+            listOf("SN-TEST-001", "SN-TEST-002"),
+            mov.lineas.mapNotNull { it.serieEnMovimiento() },
+        )
     }
 
     @Test

@@ -515,7 +515,7 @@ fun RegistrarSalidaScreen(
                                 LineaSalidaEditor(
                                     linea = linea,
                                     onCantidadChange = { nueva ->
-                                        val idx = lineas.indexOfFirst { it.requireItem().id == linea.requireItem().id }
+                                        val idx = lineas.indexOfFirst { it.lineaId == linea.lineaId }
                                         if (idx >= 0 && !linea.requireItem().usaSeriesInventario) {
                                             val max = linea.requireItem().stockDisponible
                                             lineas[idx] = lineas[idx].copy(cantidad = nueva.coerceIn(0.0, max))
@@ -523,7 +523,7 @@ fun RegistrarSalidaScreen(
                                     },
                                     onAbrirSeries = { lineaSeriesId = linea.requireItem().id },
                                     onEliminar = {
-                                        lineas.removeAll { it.requireItem().id == linea.requireItem().id }
+                                        lineas.removeAll { it.lineaId == linea.lineaId }
                                     },
                                 )
                                 Spacer(Modifier.height(8.dp))
@@ -623,11 +623,12 @@ fun RegistrarSalidaScreen(
             busquedaProducto = ""
         },
         onItemSeleccionado = { item ->
-            if (lineas.none { it.requireItem().id == item.id }) {
-                lineas += item.aLineaCatalogoItem(
-                    cantidad = if (item.usaSeriesInventario) 0.0 else 1.0,
-                    almacenId = almacenProcedenciaEfectivo,
-                )
+            if (item.usaSeriesInventario) {
+                if (lineas.none { it.catalogItemId == item.id && it.productoSerie == null }) {
+                    lineas += item.aLineaCatalogoItem(cantidad = 0.0, almacenId = almacenProcedenciaEfectivo)
+                }
+            } else if (lineas.none { it.catalogItemId == item.id }) {
+                lineas += item.aLineaCatalogoItem(cantidad = 1.0, almacenId = almacenProcedenciaEfectivo)
             }
             mostrarBuscarProducto = false
             busquedaProducto = ""
@@ -664,19 +665,23 @@ fun RegistrarSalidaScreen(
         almacenId = almacenProcedenciaEfectivo.orEmpty(),
         token = token,
         catalogItem = lineaSeries?.catalogItem,
-        seriesIniciales = lineaSeries?.series.orEmpty(),
+        seriesIniciales = lineas
+            .filter { it.catalogItemId == lineaSeries?.catalogItemId }
+            .mapNotNull { it.productoSerie },
         onDismiss = { lineaSeriesId = null },
         onConfirmar = { seleccionadas ->
-            val catalogId = lineaSeries?.catalogItem?.id ?: return@SalidaSeleccionSeriesSheet
-            val idx = lineas.indexOfFirst { it.requireItem().id == catalogId }
-            if (idx >= 0) {
-                lineas[idx] = lineas[idx].copy(
-                    series = seleccionadas,
-                    numerosSerie = emptyList(),
-                    almacenId = almacenProcedenciaEfectivo ?: seleccionadas.firstOrNull()?.almacenId,
-                    cantidad = seleccionadas.size.toDouble(),
-                )
+            val item = lineaSeries?.catalogItem ?: return@SalidaSeleccionSeriesSheet
+            val catalogId = item.id
+            val sinEste = lineas.filter { it.catalogItemId != catalogId }
+            val nuevas = seleccionadas.map { serie ->
+                item.aLineaCatalogoItem(
+                    cantidad = 1.0,
+                    almacenId = almacenProcedenciaEfectivo ?: serie.almacenId,
+                    productoSerie = serie,
+                ).copy(lineaId = java.util.UUID.randomUUID().toString())
             }
+            lineas.clear()
+            lineas.addAll(sinEste + nuevas)
             lineaSeriesId = null
         },
     )
@@ -845,7 +850,9 @@ private fun LineaSalidaEditor(
                     buildString {
                         linea.requireItem().codigo?.let { append("$it · ") }
                         if (linea.requireItem().usaSeriesInventario) {
-                            append("${linea.series.size} series · ")
+                            val serieLabel = linea.productoSerie?.numeroSerie?.let { "Serie: $it" }
+                                ?: "Sin serie · toca para elegir"
+                            append("$serieLabel · ")
                         } else {
                             append(
                                 "Stock: ${

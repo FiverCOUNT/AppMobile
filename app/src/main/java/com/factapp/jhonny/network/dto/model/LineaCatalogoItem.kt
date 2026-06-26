@@ -29,6 +29,9 @@ data class LineaCatalogoItem(
     val id: String? = null,
     @SerializedName("catalog_item_id")
     val catalogItemId: String = "",
+    /** ID de la línea original en sale_details (solo NC sobre documento afectado). */
+    @SerializedName("sale_detail_id")
+    val saleDetailId: String? = null,
     /** Snapshot — nombre al momento de la operación. */
     val nombre: String? = null,
     val codigo: String? = null,
@@ -54,15 +57,6 @@ data class LineaCatalogoItem(
     val almacenId: String? = null,
     @SerializedName(value = "producto_serie", alternate = ["serie"])
     val productoSerie: ProductoSerie? = null,
-    @SerializedName("series")
-    val numerosSerieApi: List<String>? = null,
-    @SerializedName(value = "numeros_serie", alternate = ["numerosSerie"])
-    val numerosSerie: List<String> = emptyList(),
-    @SerializedName("serie_ids")
-    val serieIds: List<String>? = null,
-    /** Series en memoria (UI); el API envía strings en [numerosSerieApi]. */
-    @SerializedName("series_ui")
-    val series: List<ProductoSerie> = emptyList(),
     /** Referencia viva al catálogo (solo pantalla; no viene del API). */
     @SerializedName("catalog_item_ui")
     val catalogItem: CatalogItem? = null,
@@ -113,38 +107,23 @@ data class LineaCatalogoItem(
     val total: Double
         get() = round4(subtotal + igv)
 
-    val numerosSerieUi: List<String>
-        get() = when {
-            numerosSerie.isNotEmpty() -> numerosSerie
-            !numerosSerieApi.isNullOrEmpty() -> numerosSerieApi
-            series.isNotEmpty() -> series.map { it.numeroSerie }
-            productoSerie != null -> listOf(productoSerie.numeroSerie)
-            else -> emptyList()
-        }
-
-    val seriesEfectivas: List<ProductoSerie>
-        get() = when {
-            series.isNotEmpty() -> series
-            productoSerie != null -> listOf(productoSerie)
-            else -> emptyList()
-        }
+    val numeroSerieEfectivo: String?
+        get() = productoSerie?.numeroSerie?.takeIf { it.isNotBlank() }
 
     val almacenIdEfectivo: String?
-        get() = almacenId ?: seriesEfectivas.firstOrNull()?.almacenId
+        get() = almacenId ?: productoSerie?.almacenId
+
+    val tieneSerie: Boolean
+        get() = productoSerie != null
 
     val tieneSeries: Boolean
-        get() = productoSerie != null ||
-            series.isNotEmpty() ||
-            numerosSerie.isNotEmpty() ||
-            !numerosSerieApi.isNullOrEmpty() ||
-            !serieIds.isNullOrEmpty()
+        get() = manejaSerieEfectivo || productoSerie != null
 }
 
 fun CatalogItem.aLineaCatalogoItem(
     cantidad: Double = 1.0,
     almacenId: String? = null,
-    series: List<ProductoSerie> = emptyList(),
-    numerosSerie: List<String> = emptyList(),
+    productoSerie: ProductoSerie? = null,
 ): LineaCatalogoItem = LineaCatalogoItem(
     catalogItemId = id,
     nombre = nombre,
@@ -158,18 +137,16 @@ fun CatalogItem.aLineaCatalogoItem(
     manejaSerie = manejaSerie,
     cantidad = cantidad,
     almacenId = almacenId,
-    series = series,
-    numerosSerie = numerosSerie,
+    productoSerie = productoSerie,
     catalogItem = this,
 )
 
 /** @see aLineaCatalogoItem */
-@Deprecated("Usa aLineaCatalogoItem", ReplaceWith("aLineaCatalogoItem(cantidad, almacenId, series, numerosSerie)"))
+@Deprecated("Usa aLineaCatalogoItem", ReplaceWith("aLineaCatalogoItem(cantidad, almacenId, productoSerie)"))
 fun CatalogItem.aLineaCatalogo(
     cantidad: Double = 1.0,
-    series: List<ProductoSerie> = emptyList(),
-    numerosSerie: List<String> = emptyList(),
-): LineaCatalogoItem = aLineaCatalogoItem(cantidad = cantidad, series = series, numerosSerie = numerosSerie)
+    productoSerie: ProductoSerie? = null,
+): LineaCatalogoItem = aLineaCatalogoItem(cantidad = cantidad, productoSerie = productoSerie)
 
 fun lineaCatalogoSinSerie(
     catalogItemId: String,
@@ -183,12 +160,10 @@ fun lineaCatalogoConSerie(
     cantidad: Double = 1.0,
     catalogItem: CatalogItem? = null,
 ): LineaCatalogoItem = LineaCatalogoItem(
-    cantidad = cantidad,
+    cantidad = cantidad.coerceAtMost(1.0),
     productoSerie = serie,
-    series = listOf(serie),
     catalogItemId = serie.catalogItemId,
-    catalogItem = catalogItem?.takeIf { it.id == serie.catalogItemId }
-        ?: catalogItem,
+    catalogItem = catalogItem?.takeIf { it.id == serie.catalogItemId } ?: catalogItem,
     nombre = catalogItem?.nombre,
     descripcion = catalogItem?.descripcion,
     unidad = catalogItem?.unidad,
@@ -197,52 +172,19 @@ fun lineaCatalogoConSerie(
     kind = catalogItem?.kind,
     manejaStock = catalogItem?.manejaStock,
     manejaSerie = catalogItem?.manejaSerie ?: true,
+    almacenId = serie.almacenId,
 )
 
-fun lineaCatalogoConNumerosSerie(
-    catalogItemId: String,
-    numerosSerie: List<String>,
-    catalogItem: CatalogItem? = null,
-): LineaCatalogoItem = catalogItem?.aLineaCatalogoItem(
-    cantidad = numerosSerie.size.toDouble(),
-    numerosSerie = numerosSerie,
-) ?: LineaCatalogoItem(
-    catalogItemId = catalogItemId,
-    cantidad = numerosSerie.size.toDouble(),
-    numerosSerie = numerosSerie,
-    manejaSerie = true,
-)
+fun LineaCatalogoItem.resumenSerie(): String? = productoSerie?.numeroSerie
 
-fun lineaCatalogoConSerieIds(
-    catalogItemId: String,
-    serieIds: List<String>,
-    catalogItem: CatalogItem? = null,
-): LineaCatalogoItem = catalogItem?.aLineaCatalogoItem(
-    cantidad = serieIds.size.toDouble(),
-) ?: LineaCatalogoItem(
-    catalogItemId = catalogItemId,
-    cantidad = serieIds.size.toDouble(),
-    serieIds = serieIds,
-)
+/** @see resumenSerie */
+fun LineaCatalogoItem.resumenSeries(): String? = resumenSerie()
 
-fun LineaCatalogoItem.resumenSeries(): String? = when {
-    productoSerie != null -> productoSerie.numeroSerie
-    numerosSerieUi.isNotEmpty() -> numerosSerieUi.joinToString(", ")
-    !serieIds.isNullOrEmpty() -> "${serieIds.size} serie(s)"
-    else -> null
-}
+fun LineaCatalogoItem.serieEnMovimiento(): String? = productoSerie?.numeroSerie?.takeIf { it.isNotBlank() }
 
-fun LineaCatalogoItem.seriesEnMovimiento(): List<String>? {
-    numerosSerieUi.takeIf { it.isNotEmpty() }?.let { return it }
-    resumenSeries()?.let { resumen ->
-        return if (resumen.contains(",")) {
-            resumen.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        } else {
-            listOf(resumen.trim())
-        }
-    }
-    return null
-}
+/** @see serieEnMovimiento */
+fun LineaCatalogoItem.seriesEnMovimiento(): List<String>? =
+    serieEnMovimiento()?.let { listOf(it) }
 
 @Deprecated("Usa LineaCatalogoItem", ReplaceWith("LineaCatalogoItem"))
 typealias LineaCatalogo = LineaCatalogoItem
@@ -263,24 +205,18 @@ val LineaCatalogoItem.requiereSeries: Boolean
 
 fun LineaCatalogoItem.seriesValidas(): Boolean {
     if (!requiereSeries) return true
-    if (series.isNotEmpty()) {
-        return series.size == cantidad.roundToInt() &&
-            cantidad == cantidad.roundToInt().toDouble()
-    }
-    val lista = numerosSerie.map { it.trim() }.filter { it.isNotEmpty() }
-    return lista.size == cantidad.roundToInt() &&
-        cantidad == cantidad.roundToInt().toDouble()
+    return productoSerie != null && cantidad == 1.0
 }
 
 fun LineaCatalogoItem.seriesEnAlmacen(): Boolean {
-    if (series.isEmpty()) return true
+    if (productoSerie == null) return true
     val alm = almacenIdEfectivo ?: return true
-    return series.all { it.almacenId == null || it.almacenId == alm }
+    return productoSerie.almacenId == null || productoSerie.almacenId == alm
 }
 
 fun LineaCatalogoItem.seriesDisponiblesParaEmision(): Boolean {
     if (!requiereSeries) return true
-    return series.isNotEmpty() && seriesValidas()
+    return productoSerie != null && seriesValidas()
 }
 
 /** Marca el almacén de salida en cada línea antes de emitir (no altera el almacén real de cada serie). */
@@ -290,28 +226,22 @@ fun List<LineaCatalogoItem>.prepararLineasParaEmitir(almacenSalidaId: String): L
 }
 
 fun LineaCatalogoItem.aEmitirLinea(incluirPrecio: Boolean = false): EmitirLineaRequest {
-    val unidades = seriesEfectivas.filter {
+    val serie = productoSerie?.takeIf {
         it.id.isNotBlank() && it.id != "temp" && !it.id.startsWith("scan-")
-    }
-    val numeros = unidades.map { it.numeroSerie.trim() }.filter { it.isNotEmpty() }
-    val ids = unidades.map { it.id }
-    val cantidadEmitir = when {
-        unidades.isNotEmpty() -> unidades.size.toDouble()
-        else -> cantidad
     }
     return EmitirLineaRequest(
         catalogItemId = catalogItemId,
-        cantidad = cantidadEmitir,
+        cantidad = if (serie != null) 1.0 else cantidad,
         precioUnitario = if (incluirPrecio) precioUnitarioEfectivo.takeIf { it > 0 } else null,
-        serieIds = ids.takeIf { it.isNotEmpty() },
-        series = numeros.takeIf { it.isNotEmpty() },
-        numerosSerie = numeros.takeIf { it.isNotEmpty() },
+        saleDetailId = saleDetailId?.takeIf { it.isNotBlank() },
+        productoSerieId = serie?.id,
+        numeroSerie = serie?.numeroSerie?.takeIf { it.isNotBlank() },
     )
 }
 
-fun LineaCatalogoItem.numerosSerieLimpios(): List<String>? {
+fun LineaCatalogoItem.numeroSerieLimpio(): String? {
     if (!requiereSeries) return null
-    return numerosSerieUi.map { it.trim() }.filter { it.isNotEmpty() }.takeIf { it.isNotEmpty() }
+    return productoSerie?.numeroSerie?.trim()?.takeIf { it.isNotEmpty() }
 }
 
 fun LineaCatalogoItem.listaParaEmitir(): Boolean {
@@ -334,13 +264,11 @@ fun List<LineaCatalogoItem>.agregarDesdeCatalogo(
 ): List<LineaCatalogoItem> {
     if (item.usaSeriesInventario) {
         if (item.debeValidarStockEnEmision() && !item.hayStockParaEmision(1.0)) return this
-        return this + item.aLineaCatalogoItem(
-            cantidad = 1.0,
-            almacenId = almacenId,
-            numerosSerie = listOf(""),
-        )
+        return this + item.aLineaCatalogoItem(cantidad = 1.0, almacenId = almacenId)
     }
-    val existente = find { it.catalogItemId == item.id && it.almacenId == almacenId }
+    val existente = find {
+        it.catalogItemId == item.id && it.almacenId == almacenId && !it.requiereSeries
+    }
     return if (existente != null) {
         val nuevaCantidad = existente.cantidad + 1.0
         if (item.debeValidarStockEnEmision() && !item.hayStockParaEmision(nuevaCantidad)) return this
@@ -390,61 +318,32 @@ fun List<LineaCatalogoItem>.actualizarCantidad(lineaId: String, cantidad: Double
         val item = linea.catalogItem
         val cantidadAjustada = item?.coerceCantidadParaEmision(cantidad) ?: cantidad
         if (!linea.requiereSeries) return@map linea.copy(cantidad = cantidadAjustada)
-        val n = cantidadAjustada.roundToInt()
-        if (n <= 0) return@map linea
-        val maxSeries = item?.cantidadMaximaEnEmision()?.roundToInt() ?: n
-        val nFinal = n.coerceAtMost(maxSeries)
-        val actuales = linea.numerosSerieUi
-        val nuevas = when {
-            actuales.size < nFinal -> actuales + List(nFinal - actuales.size) { "" }
-            actuales.size > nFinal -> actuales.take(nFinal)
-            else -> actuales
-        }
-        linea.copy(cantidad = nFinal.toDouble(), numerosSerie = nuevas, series = emptyList())
+        return@map linea.copy(cantidad = 1.0)
     }
 }
 
-fun List<LineaCatalogoItem>.actualizarSeries(lineaId: String, series: List<String>): List<LineaCatalogoItem> =
-    map { linea ->
-        if (linea.lineaId == lineaId) {
-            val limpias = series.map { it.trim() }
-            linea.copy(
-                cantidad = limpias.size.coerceAtLeast(1).toDouble(),
-                numerosSerie = limpias,
-                series = emptyList(),
-            )
-        } else {
-            linea
-        }
-    }
-
-fun List<LineaCatalogoItem>.actualizarSerieEnIndice(
+fun List<LineaCatalogoItem>.actualizarProductoSerie(
     lineaId: String,
-    indice: Int,
-    numeroSerie: String,
+    serie: ProductoSerie?,
 ): List<LineaCatalogoItem> = map { linea ->
-    if (linea.lineaId != lineaId) return@map linea
-    val base = linea.numerosSerieUi.toMutableList()
-    while (base.size <= indice) base.add("")
-    base[indice] = numeroSerie
-    linea.copy(numerosSerie = base, series = emptyList(), cantidad = base.size.toDouble())
+    if (linea.lineaId != lineaId) linea
+    else linea.copy(productoSerie = serie, cantidad = if (serie != null) 1.0 else linea.cantidad)
 }
 
 fun List<LineaCatalogoItem>.actualizarSeriesInventario(
     catalogItemId: String,
     almacenId: String?,
     seleccionadas: List<ProductoSerie>,
-): List<LineaCatalogoItem> = map { linea ->
-    if (linea.catalogItemId == catalogItemId) {
-        linea.copy(
-            series = seleccionadas,
-            numerosSerie = emptyList(),
-            almacenId = almacenId ?: seleccionadas.firstOrNull()?.almacenId ?: linea.almacenId,
-            cantidad = seleccionadas.size.toDouble(),
+): List<LineaCatalogoItem> {
+    val sinEste = filter { it.catalogItemId != catalogItemId }
+    val item = find { it.catalogItemId == catalogItemId }?.catalogItem
+    val nuevas = seleccionadas.map { serie ->
+        lineaCatalogoConSerie(serie, cantidad = 1.0, catalogItem = item).copy(
+            almacenId = almacenId ?: serie.almacenId,
+            lineaId = UUID.randomUUID().toString(),
         )
-    } else {
-        linea
     }
+    return sinEste + nuevas
 }
 
 fun List<LineaCatalogoItem>.eliminarLinea(lineaId: String): List<LineaCatalogoItem> =
@@ -454,7 +353,7 @@ fun List<LineaCatalogoItem>.eliminarPorCatalogo(catalogItemId: String): List<Lin
     filter { it.catalogItemId != catalogItemId }
 
 fun List<LineaCatalogoItem>.actualizarAlmacen(almacenId: String?): List<LineaCatalogoItem> =
-    map { it.copy(almacenId = almacenId, series = emptyList(), cantidad = if (it.requiereSeries) 0.0 else it.cantidad) }
+    map { it.copy(almacenId = almacenId, productoSerie = null, cantidad = if (it.requiereSeries) 0.0 else it.cantidad) }
 
 data class TotalesComprobante(
     val subtotal: Double,
@@ -481,9 +380,7 @@ fun List<LineaCatalogoItem>.lineasListasParaSalida(): Boolean =
         val almacenOk = !item.manejaInventario || !linea.almacenIdEfectivo.isNullOrBlank()
         if (!almacenOk) return@all false
         if (item.usaSeriesInventario) {
-            linea.series.isNotEmpty() &&
-                linea.cantidad == linea.series.size.toDouble() &&
-                linea.seriesEnAlmacen()
+            linea.productoSerie != null && linea.cantidad == 1.0 && linea.seriesEnAlmacen()
         } else {
             linea.cantidad > 0 && item.hayStockParaEmision(linea.cantidad)
         }
@@ -495,19 +392,7 @@ fun List<LineaCatalogoItem>.lineasListasParaIngreso(): Boolean =
         val almacenOk = !item.manejaInventario || !linea.almacenId.isNullOrBlank()
         if (!almacenOk) return@all false
         if (item.usaSeriesInventario) {
-            val unidades = linea.series.ifEmpty {
-                linea.numerosSerieLimpios().orEmpty().map { num ->
-                    ProductoSerie(
-                        id = "temp",
-                        companyRuc = item.companyRuc,
-                        catalogItemId = linea.catalogItemId,
-                        numeroSerie = num,
-                        almacenId = linea.almacenId,
-                        estado = ProductoSerieEstado.DISPONIBLE,
-                    )
-                }
-            }
-            unidades.isNotEmpty() && linea.cantidad == unidades.size.toDouble()
+            linea.productoSerie != null && linea.cantidad == 1.0
         } else {
             linea.cantidad > 0
         }
@@ -529,23 +414,21 @@ fun LineaCatalogoItem.aRegistrarMovimientoLinea(): RegistrarMovimientoLineaReque
             cantidad = cantidad,
         )
     }
-    val idsInventario = seriesEfectivas
-        .map { it.id }
-        .filter { id -> id.isNotBlank() && !id.startsWith("scan-") && id != "temp" }
-    val numeros = numerosSerieLimpios()
-        ?: seriesEfectivas.takeIf { it.isNotEmpty() }?.map { it.numeroSerie }
+    val serie = productoSerie
     return RegistrarMovimientoLineaRequest(
         catalogItemId = catalogItemId,
-        cantidad = cantidad,
-        numerosSerie = numeros.takeIf { idsInventario.isEmpty() },
-        serieIds = idsInventario.takeIf { it.isNotEmpty() },
+        cantidad = 1.0,
+        productoSerieId = serie?.id?.takeIf { id ->
+            id.isNotBlank() && !id.startsWith("scan-") && id != "temp"
+        },
+        numeroSerie = serie?.numeroSerie?.trim()?.takeIf { it.isNotEmpty() },
     )
 }
 
 fun LineaCatalogoItem.enriquecerConCatalogo(
     catalogItem: CatalogItem,
     almacenId: String? = null,
-    seriesPorId: (String) -> ProductoSerie? = { null },
+    @Suppress("UNUSED_PARAMETER") seriesPorId: (String) -> ProductoSerie? = { null },
 ): LineaCatalogoItem {
     val base = copy(
         catalogItem = catalogItem,
@@ -560,26 +443,10 @@ fun LineaCatalogoItem.enriquecerConCatalogo(
         manejaSerie = manejaSerie ?: catalogItem.manejaSerie,
         almacenId = almacenId ?: this.almacenId,
     )
-    return when {
-        productoSerie != null -> base.copy(
-            almacenId = almacenId ?: productoSerie.almacenId,
-            series = listOf(productoSerie),
-        )
-        !serieIds.isNullOrEmpty() -> {
-            val unidades = serieIds.mapNotNull(seriesPorId)
-            if (unidades.isNotEmpty()) {
-                base.copy(
-                    almacenId = almacenId ?: unidades.firstOrNull()?.almacenId,
-                    series = unidades,
-                )
-            } else {
-                base
-            }
-        }
-        numerosSerieApi != null || numerosSerie.isNotEmpty() -> base.copy(
-            numerosSerie = numerosSerie.ifEmpty { numerosSerieApi.orEmpty() },
-        )
-        else -> base
+    return if (productoSerie != null) {
+        base.copy(almacenId = almacenId ?: productoSerie.almacenId)
+    } else {
+        base
     }
 }
 

@@ -42,9 +42,6 @@ data class Invoice(
     val cliente: Cliente? = null,
     @SerializedName(value = "details", alternate = ["lineas", "items"])
     val details: List<SaleDetail> = emptyList(),
-    /** JSON anidado legacy: `"totales": { "subtotal", "igv", "total" }`. */
-    @SerializedName("totales")
-    val totalesJson: ComprobanteTotales? = null,
     @SerializedName(value = "legends", alternate = ["leyendas"])
     val legends: List<Legend>? = null,
     @SerializedName("forma_pago")
@@ -148,6 +145,11 @@ data class Invoice(
     val emisor: Company?
         get() = company
 
+    /** Proveedor en compras: empresa que te emitió el comprobante. */
+    val proveedor: Company
+        get() = emisor?.takeIf { it.nombre.isNotBlank() || it.ruc.isNotBlank() }
+            ?: Company(ruc = companyRuc, nombre = companyRuc.ifBlank { "Proveedor" })
+
     val etiquetaCompleta: String
         get() = "$serie-$correlativo"
 
@@ -167,32 +169,28 @@ data class Invoice(
     val cantidadFacturasVinculadas: Int
         get() = facturas?.size ?: 0
 
-    /** Totales efectivos desde montos UBL planos, JSON anidado o suma de [details]. */
+    /** Totales desde columnas UBL o suma de [details]. */
     val totales: ComprobanteTotales
         get() {
             val sub = subTotal
-                ?: totalesJson?.subtotal
                 ?: mtoOperGravadas
                 ?: details.takeIf { it.isNotEmpty() }?.sumOf { it.subtotal }
                 ?: 0.0
             val igvVal = mtoIgv
                 ?: totalImpuestos
-                ?: totalesJson?.igv
                 ?: details.takeIf { it.isNotEmpty() }?.sumOf { it.igv }
                 ?: 0.0
-            val totalVal = mtoImpVenta
-                ?: totalesJson?.total
-                ?: (sub + igvVal)
+            val totalVal = mtoImpVenta ?: (sub + igvVal)
             return ComprobanteTotales(
                 subtotal = sub,
                 igv = igvVal,
                 total = totalVal,
-                moneda = totalesJson?.moneda ?: tipoMoneda,
-                mtoOperGravadas = mtoOperGravadas ?: totalesJson?.mtoOperGravadas,
-                mtoOperExoneradas = mtoOperExoneradas ?: totalesJson?.mtoOperExoneradas,
-                mtoOperInafectas = mtoOperInafectas ?: totalesJson?.mtoOperInafectas,
-                mtoOperExportacion = mtoOperExportacion ?: totalesJson?.mtoOperExportacion,
-                totalImpuestos = totalImpuestos ?: totalesJson?.totalImpuestos,
+                moneda = tipoMoneda,
+                mtoOperGravadas = mtoOperGravadas,
+                mtoOperExoneradas = mtoOperExoneradas,
+                mtoOperInafectas = mtoOperInafectas,
+                mtoOperExportacion = mtoOperExportacion,
+                totalImpuestos = totalImpuestos,
             )
         }
 
@@ -270,12 +268,14 @@ object InvoiceTipoDoc {
     const val NOTA_CREDITO = "NOTA_CREDITO"
     const val NOTA_DEBITO = "NOTA_DEBITO"
     const val GUIA_EMISION = "GUIA_EMISION"
+    const val GUIA_TRANSPORTISTA = "GUIA_TRANSPORTISTA"
 
     const val COD_FACTURA = "01"
     const val COD_BOLETA = "03"
     const val COD_NOTA_CREDITO = "07"
     const val COD_NOTA_DEBITO = "08"
     const val COD_GUIA = "09"
+    const val COD_GUIA_TRANSPORTISTA = "31"
 }
 
 private fun normalizarTipoDocumento(tipoRaw: String): String = when (tipoRaw.trim()) {
@@ -284,6 +284,7 @@ private fun normalizarTipoDocumento(tipoRaw: String): String = when (tipoRaw.tri
     InvoiceTipoDoc.COD_NOTA_CREDITO -> InvoiceTipoDoc.NOTA_CREDITO
     InvoiceTipoDoc.COD_NOTA_DEBITO -> InvoiceTipoDoc.NOTA_DEBITO
     InvoiceTipoDoc.COD_GUIA -> InvoiceTipoDoc.GUIA_EMISION
+    InvoiceTipoDoc.COD_GUIA_TRANSPORTISTA -> InvoiceTipoDoc.GUIA_TRANSPORTISTA
     else -> tipoRaw
 }
 

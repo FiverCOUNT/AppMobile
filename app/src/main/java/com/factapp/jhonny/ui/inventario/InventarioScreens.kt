@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Input
 import androidx.compose.material.icons.filled.Inventory2
@@ -119,6 +120,7 @@ fun SalidasScreen(
     usuario: Usuario? = null,
     onVolver: () -> Unit = {},
     onNuevaSalida: () -> Unit = {},
+    onAbrirComprobanteVenta: (String) -> Unit = {},
 ) {
     BackHandler(onBack = onVolver)
     val context = LocalContext.current
@@ -306,6 +308,7 @@ fun SalidasScreen(
         catalogo = catalogoMap,
         almacenes = almacenesMap,
         onDismiss = { salidaDetalle = null },
+        onAbrirComprobanteVenta = onAbrirComprobanteVenta,
     )
 }
 
@@ -466,6 +469,7 @@ private fun SalidaDetalleSheet(
     catalogo: Map<String, CatalogItem>,
     almacenes: Map<String, Almacen>,
     onDismiss: () -> Unit,
+    onAbrirComprobanteVenta: (String) -> Unit = {},
 ) {
     if (salida == null) return
 
@@ -492,11 +496,7 @@ private fun SalidaDetalleSheet(
             MovimientoDetalleLineaUi(
                 nombre = nombre,
                 cantidad = formatCantidadConUnidad(linea.cantidad, unidad),
-                series = linea.resumenSeries()
-                    ?.split(",")
-                    ?.map { it.trim() }
-                    ?.filter { it.isNotEmpty() }
-                    .orEmpty(),
+                series = listOfNotNull(linea.resumenSeries()),
                 manejaSerie = linea.tieneSeries,
             )
         },
@@ -513,8 +513,18 @@ private fun SalidaDetalleSheet(
                 )
                 add(MovimientoDetalleCampoUi("Documento", "${cliente.tipoDoc} - ${cliente.numeroDoc}", Icons.Default.Tag))
             }
-            salida.comprobanteId?.let {
-                add(MovimientoDetalleCampoUi("Comprobante venta", it, Icons.Default.Tag))
+            salida.comprobanteId?.let { id ->
+                add(
+                    MovimientoDetalleCampoUi(
+                        etiqueta = "Comprobante venta",
+                        valor = "Ver en comprobantes emitidos",
+                        icono = Icons.Default.Description,
+                        onClick = {
+                            onDismiss()
+                            onAbrirComprobanteVenta(id)
+                        },
+                    ),
+                )
             }
             salida.etiquetaGuiaRemision()?.let { guia ->
                 add(MovimientoDetalleCampoUi("Guía de remisión", guia, Icons.Default.LocalShipping))
@@ -647,6 +657,7 @@ fun IngresosScreen(
     usuario: Usuario? = null,
     onVolver: () -> Unit = {},
     onIrACatalogo: () -> Unit = {},
+    onAbrirComprobanteVenta: (String) -> Unit = {},
 ) {
     BackHandler(onBack = onVolver)
     val context = LocalContext.current
@@ -723,8 +734,7 @@ fun IngresosScreen(
                         catalogoMap[linea.catalogItemId]?.nombre?.lowercase()?.contains(q) == true ||
                             linea.nombreEfectivo.lowercase().contains(q) ||
                             linea.catalogItemId.lowercase().contains(q) ||
-                            linea.productoSerie?.numeroSerie?.lowercase()?.contains(q) == true ||
-                            linea.numerosSerieUi.any { sn -> sn.lowercase().contains(q) }
+                            linea.productoSerie?.numeroSerie?.lowercase()?.contains(q) == true
                     }
             }
         }
@@ -891,6 +901,7 @@ fun IngresosScreen(
         catalogo = catalogoMap,
         almacenes = almacenesMap,
         onDismiss = { ingresoDetalle = null },
+        onAbrirComprobanteVenta = onAbrirComprobanteVenta,
     )
 }
 

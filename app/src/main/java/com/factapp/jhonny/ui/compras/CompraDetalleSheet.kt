@@ -85,11 +85,19 @@ fun CompraDetalleSheet(
     var descargandoPdfFormato by remember(compra.id) { mutableStateOf<PdfFormato?>(null) }
     var reenviando by remember(compra.id) { mutableStateOf(false) }
     val esVenta = modo == DetalleComprobanteModo.VENTA
-    val tituloReceptor = if (esVenta) "Cliente / receptor" else "Proveedor"
-    val tituloDocumento = if (esVenta) "Documento receptor" else "Documento proveedor"
-    val receptorNombre = compra.cliente?.razonSocial ?: compra.receptor.nombre
-    val receptorDocumento = compra.cliente?.etiquetaDocumento
-        ?: compra.receptor.documentoNumero
+    val tituloReceptor = if (esVenta) "Cliente / receptor" else "Proveedor / emisor"
+    val tituloDocumento = if (esVenta) "Documento receptor" else "RUC proveedor"
+    val proveedor = compra.proveedor
+    val receptorNombre = if (esVenta) {
+        compra.cliente?.razonSocial ?: compra.receptor.nombre
+    } else {
+        proveedor.nombre
+    }
+    val receptorDocumento = if (esVenta) {
+        compra.cliente?.etiquetaDocumento ?: compra.receptor.documentoNumero
+    } else {
+        proveedor.ruc.ifBlank { proveedor.documentoNumero }
+    }
     val estadoColor = Color(compra.estado.colorArgb())
     val scroll = rememberScrollState()
 
@@ -258,6 +266,8 @@ fun CompraDetalleSheet(
                             refs.joinToString(", ") { it.etiquetaCompleta },
                         )
                     }
+                } else {
+                    DetalleFila("Tu RUC (receptor)", compra.receptor.documentoNumero)
                 }
             }
 

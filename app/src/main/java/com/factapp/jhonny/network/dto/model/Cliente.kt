@@ -54,12 +54,13 @@ fun List<Cliente>.aptosParaBoleta(): List<Cliente> = filter { !it.esEmpresa }
 
 fun Cliente.esAptoReceptor(tipo: TipoComprobante): Boolean = when (tipo) {
     TipoComprobante.BOLETA -> !esEmpresa
-    TipoComprobante.FACTURA, TipoComprobante.NOTA_CREDITO -> esEmpresa
+    TipoComprobante.FACTURA, TipoComprobante.NOTA_CREDITO, TipoComprobante.NOTA_DEBITO -> esEmpresa
     else -> true
 }
 
 fun List<Cliente>.aptosParaComprobante(tipo: TipoComprobante): List<Cliente> = when (tipo) {
     TipoComprobante.BOLETA -> aptosParaBoleta()
-    TipoComprobante.FACTURA, TipoComprobante.NOTA_CREDITO -> filter { it.esEmpresa }
+    TipoComprobante.FACTURA, TipoComprobante.NOTA_CREDITO, TipoComprobante.NOTA_DEBITO ->
+        filter { it.esEmpresa }
     else -> this
 }

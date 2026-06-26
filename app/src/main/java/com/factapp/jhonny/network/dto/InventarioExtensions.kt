@@ -112,7 +112,8 @@ fun ProductoSerie.aRegistrarMovimientoLineaRequest(
 ): RegistrarMovimientoLineaRequest = RegistrarMovimientoLineaRequest(
     catalogItemId = catalogItemId,
     cantidad = cantidad,
-    serieIds = listOf(id),
+    productoSerieId = id,
+    numeroSerie = numeroSerie,
 )
 
 fun LineaCatalogoItem.aplicaIngresoDevolucionNotaCredito(): Boolean {

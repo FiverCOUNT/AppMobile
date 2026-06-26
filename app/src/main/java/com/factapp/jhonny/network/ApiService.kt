@@ -14,10 +14,14 @@ import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.model.Movimiento
 import com.factapp.jhonny.network.dto.request.RegistrarSalidaRequest
 import com.factapp.jhonny.network.dto.ApiEnvelope
+import com.factapp.jhonny.network.dto.model.ConfiguracionAppApi
 import com.factapp.jhonny.network.dto.model.UsuarioSesionApi
 import com.factapp.jhonny.network.dto.request.LoginApiRequest
 import com.factapp.jhonny.network.dto.request.RefreshTokenRequest
 import com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest
+import com.factapp.jhonny.network.dto.request.GreBajaRequest
+import com.factapp.jhonny.network.dto.request.GreEventoRequest
+import com.factapp.jhonny.network.dto.request.GreOperacionResponse
 import com.factapp.jhonny.network.dto.model.ProductoDevolucionCliente
 import com.factapp.jhonny.network.dto.model.ProductoSerie
 import com.factapp.jhonny.network.dto.model.SeriesComprobanteItem
@@ -45,6 +49,10 @@ interface ApiService {
     /** Perfil y configuración actual (empresa, series, almacenes). */
     @GET("auth/me")
     suspend fun me(@Header("Authorization") authorization: String): ApiEnvelope<UsuarioSesionApi>
+
+    /** Soporte y URL de actualizaciones de la app móvil. */
+    @GET("configuracion")
+    suspend fun obtenerConfiguracionApp(): ApiEnvelope<ConfiguracionAppApi>
 
     /** Catálogo de productos/servicios de la empresa (origen: servidor). */
     /** Clientes de la empresa emisora (personas y empresas receptoras). */
@@ -130,6 +138,22 @@ interface ApiService {
         @Header("Authorization") authorization: String,
     ): Invoice
 
+    @POST("empresas/{ruc}/comprobantes/{id}/gre-eventos")
+    suspend fun registrarGreEvento(
+        @Path("ruc") ruc: String,
+        @Path("id") id: String,
+        @Header("Authorization") authorization: String,
+        @Body body: GreEventoRequest,
+    ): GreOperacionResponse
+
+    @POST("empresas/{ruc}/comprobantes/{id}/gre-baja")
+    suspend fun comunicarGreBaja(
+        @Path("ruc") ruc: String,
+        @Path("id") id: String,
+        @Header("Authorization") authorization: String,
+        @Body body: GreBajaRequest,
+    ): GreOperacionResponse
+
     @Streaming
     @GET("empresas/{ruc}/comprobantes/{id}/archivos/{tipo}")
     suspend fun descargarArchivoComprobante(
@@ -140,11 +164,13 @@ interface ApiService {
         @Query("formato") formato: String? = null,
     ): ResponseBody
 
-    /** Facturas de compra registradas (comprobantes de proveedores). */
+    /** Facturas de compra: comprobantes que otros emisores registraron con tu RUC como cliente. */
     @GET("empresas/{ruc}/compras")
     suspend fun listarCompras(
         @Path("ruc") ruc: String,
         @Header("Authorization") authorization: String,
+        @Query("desde") desde: String? = null,
+        @Query("hasta") hasta: String? = null,
     ): List<Invoice>
 
     @GET("empresas/{ruc}/almacenes")

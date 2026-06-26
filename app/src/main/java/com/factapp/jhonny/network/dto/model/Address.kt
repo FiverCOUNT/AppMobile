@@ -25,10 +25,24 @@ data class Address(
             !distrito.isNullOrBlank() &&
             !direccion.isNullOrBlank()
 
+    /** Mínimo para GRE: ubigeo + dirección de llegada/partida. */
+    val validaParaGre: Boolean
+        get() = !ubigeo.isNullOrBlank() && !direccion.isNullOrBlank()
+
+    fun tieneDatos(): Boolean =
+        !ubigeo.isNullOrBlank() ||
+            !departamento.isNullOrBlank() ||
+            !provincia.isNullOrBlank() ||
+            !distrito.isNullOrBlank() ||
+            !urbanizacion.isNullOrBlank() ||
+            !direccion.isNullOrBlank()
+
     companion object {
         const val COD_LOCAL_PRINCIPAL = "0000"
 
         fun linea(texto: String): Address = Address(direccion = texto.trim())
+
+        fun vacia(): Address = Address()
     }
 }
 

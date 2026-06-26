@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Outbox
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -52,6 +54,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -98,6 +102,7 @@ import com.factapp.jhonny.network.dto.lineasParaIngresoDevolucion
 import com.factapp.jhonny.network.dto.model.Cliente
 import com.factapp.jhonny.network.dto.model.lineasListasParaIngreso
 import com.factapp.jhonny.network.dto.model.CatalogItem
+import com.factapp.jhonny.network.dto.model.Address
 import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.model.LineaCatalogoItem
 import com.factapp.jhonny.network.dto.model.ProductoSerie
@@ -114,6 +119,9 @@ import com.factapp.jhonny.network.dto.model.calcularTotales
 import com.factapp.jhonny.network.dto.model.descripcionEnComprobante
 import com.factapp.jhonny.network.dto.model.eliminarLinea
 import com.factapp.jhonny.network.dto.model.receptorParaEmitir
+import com.factapp.jhonny.network.dto.model.companyReceptor
+import com.factapp.jhonny.network.dto.model.TIPO_DOC_DNI
+import com.factapp.jhonny.network.dto.model.TIPO_DOC_RUC
 import com.factapp.jhonny.network.dto.cantidadMaximaEnEmision
 import com.factapp.jhonny.network.dto.coerceCantidadParaEmision
 import com.factapp.jhonny.network.dto.debeValidarStockEnEmision
@@ -133,10 +141,17 @@ import com.factapp.jhonny.network.dto.prepararParaMotivoNd
 import com.factapp.jhonny.network.dto.buscarPorDocumento
 import com.factapp.jhonny.network.dto.companyRucParaCatalogo
 import com.factapp.jhonny.network.dto.filtrarComprobantesAfectados
+import com.factapp.jhonny.network.dto.esListableComoDocumentoAfectado
+import com.factapp.jhonny.network.dto.esAfectablePorNotaCredito
+import com.factapp.jhonny.network.dto.aptosParaNotaCredito
+import com.factapp.jhonny.network.dto.listablesComoDocumentoAfectado
+import com.factapp.jhonny.network.dto.model.cantidadLineasActivasNotaCredito
 import com.factapp.jhonny.network.dto.formatearSoles
 import com.factapp.jhonny.network.dto.MotivosNotaCreditoSunat
 import com.factapp.jhonny.network.dto.MotivosNotaDebitoSunat
 import com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest
+import com.factapp.jhonny.network.dto.request.GreEnvioRequest
+import com.factapp.jhonny.network.dto.request.GreVehiculoRequest
 import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.components.ComprobanteEmitHeader
 import com.factapp.jhonny.ui.components.SeleccionSeriesSheet
@@ -147,6 +162,9 @@ import androidx.compose.material3.rememberDatePickerState
 import com.factapp.jhonny.network.dto.PresetPeriodoComprobante
 import com.factapp.jhonny.ui.emitir.EmitirAlmacenOrigenCard
 import com.factapp.jhonny.ui.emitir.ComprobanteAfectadoPeriodoFiltros
+import com.factapp.jhonny.ui.components.AddressFormFields
+import com.factapp.jhonny.ui.components.AddressFormState
+import com.factapp.jhonny.ui.components.AddressResumenCard
 import com.factapp.jhonny.ui.emitir.ComprobanteAfectadoBuscarField
 import com.factapp.jhonny.ui.emitir.CatalogoBuscarSheet
 import com.factapp.jhonny.ui.emitir.MotivoNotaCreditoSelector
@@ -181,7 +199,7 @@ fun EmitirComprobanteScreen(
     val esBoleta = tipo == TipoComprobante.BOLETA
     val esFactura = tipo == TipoComprobante.FACTURA
     val esAdmin = usuario?.esAdmin() == true
-    val puedeElegirAlmacen = esAdmin && (esFactura || esBoleta)
+    val puedeElegirAlmacen = esAdmin && (esFactura || esBoleta || tipo.esGuiaTransportista)
 
     var almacenes by remember { mutableStateOf<List<Almacen>>(emptyList()) }
     var cargandoAlmacenes by remember { mutableStateOf(false) }
@@ -213,7 +231,16 @@ fun EmitirComprobanteScreen(
     var motivoCodigoNd by remember { mutableStateOf<String?>(null) }
     var observaciones by remember { mutableStateOf("") }
     var facturaEtiqueta by remember { mutableStateOf("") }
+    var busquedaFacturaGre by remember { mutableStateOf("") }
     var facturasVinculadas by remember { mutableStateOf<List<Invoice>>(emptyList()) }
+    var usarDireccionClienteGre by remember { mutableStateOf(true) }
+    var direccionLlegadaGre by remember { mutableStateOf(AddressFormState()) }
+    var docRemitente by remember { mutableStateOf("") }
+    var nombreRemitente by remember { mutableStateOf("") }
+    var greRemitenteRef by remember { mutableStateOf("") }
+    var fechaTraslado by remember { mutableStateOf("") }
+    var pesoTraslado by remember { mutableStateOf("") }
+    var placaVehiculo by remember { mutableStateOf("") }
     var guardando by remember { mutableStateOf(false) }
 
     var catalogo by remember { mutableStateOf<List<CatalogItem>>(emptyList()) }
@@ -246,7 +273,10 @@ fun EmitirComprobanteScreen(
 
     LaunchedEffect(companyRuc, token, tipo, presetPeriodoAfectado, rangoComprobantesAfectado) {
         if (companyRuc.isNullOrBlank()) return@LaunchedEffect
-        if (tipo != TipoComprobante.NOTA_CREDITO && tipo != TipoComprobante.NOTA_DEBITO) return@LaunchedEffect
+        val cargaFacturasEmitidas = tipo == TipoComprobante.NOTA_CREDITO ||
+            tipo == TipoComprobante.NOTA_DEBITO ||
+            tipo == TipoComprobante.GUIA_EMISION
+        if (!cargaFacturasEmitidas) return@LaunchedEffect
         cargandoComprobantes = true
         withContext(Dispatchers.IO) {
             ComprobanteRepository.listarEmitidos(
@@ -254,7 +284,15 @@ fun EmitirComprobanteScreen(
                 token = token,
                 desde = rangoComprobantesAfectado.first,
                 hasta = rangoComprobantesAfectado.second,
-            ).onSuccess { comprobantesEmitidos = it }
+            ).onSuccess { lista ->
+                comprobantesEmitidos = when (tipo) {
+                    TipoComprobante.NOTA_CREDITO -> lista.aptosParaNotaCredito()
+                    TipoComprobante.NOTA_DEBITO,
+                    TipoComprobante.GUIA_EMISION,
+                    -> lista.listablesComoDocumentoAfectado(soloFacturas = true)
+                    else -> lista
+                }
+            }
         }
         cargandoComprobantes = false
     }
@@ -263,7 +301,9 @@ fun EmitirComprobanteScreen(
         if (clientes.isEmpty()) return@LaunchedEffect
         val doc = docReceptor.filter { it.isDigit() }
         if (!tipo.docReceptorListo(doc)) {
-            if (tipo != TipoComprobante.NOTA_CREDITO) clienteSeleccionado = null
+            if (tipo != TipoComprobante.NOTA_CREDITO && tipo != TipoComprobante.NOTA_DEBITO) {
+                clienteSeleccionado = null
+            }
             return@LaunchedEffect
         }
         clientes.buscarPorDocumento(doc)?.let { cli ->
@@ -331,6 +371,31 @@ fun EmitirComprobanteScreen(
         almacenSeleccionadoId = nuevoId
     }
     val esGuiaEmision = tipo.esGuiaEmision
+    val esGuiaTransportista = tipo.esGuiaTransportista
+    val esGuiaRemision = tipo.esGuiaRemision
+
+    LaunchedEffect(clienteSeleccionado?.id, usarDireccionClienteGre, esGuiaEmision) {
+        if (!esGuiaEmision || !usarDireccionClienteGre) return@LaunchedEffect
+        direccionLlegadaGre = AddressFormState.fromAddress(clienteSeleccionado?.address)
+    }
+
+    val llegadaGre by remember(
+        esGuiaEmision,
+        usarDireccionClienteGre,
+        clienteSeleccionado?.address,
+        direccionLlegadaGre,
+    ) {
+        derivedStateOf {
+            if (!esGuiaEmision) return@derivedStateOf null
+            if (usarDireccionClienteGre) {
+                clienteSeleccionado?.address?.takeIf { it.tieneDatos() }
+                    ?: direccionLlegadaGre.toAddress()
+            } else {
+                direccionLlegadaGre.toAddress()
+            }
+        }
+    }
+    val llegadaGreValida = !esGuiaEmision || (llegadaGre?.validaParaGre == true)
     val esNotaCredito = tipo == TipoComprobante.NOTA_CREDITO
     val esNotaDebito = tipo == TipoComprobante.NOTA_DEBITO
     val esNotaFiscal = esNotaCredito || esNotaDebito
@@ -349,7 +414,9 @@ fun EmitirComprobanteScreen(
         documentoAfectado != null ||
         referenciaComprobanteValida(docReferencia)
     val puedeAgregarDesdeCatalogo =
-        !esGuiaEmision && usuario != null && !esNotaCredito && (!esNotaDebito || docReferenciaValida)
+        (esGuiaTransportista || (!esGuiaRemision && !esNotaCredito)) &&
+            usuario != null &&
+            (!esNotaDebito || docReferenciaValida)
 
     val docReceptorEfectivo by remember(docReceptor, clienteSeleccionado) {
         derivedStateOf {
@@ -376,8 +443,32 @@ fun EmitirComprobanteScreen(
             comprobantesEmitidos.filtrarComprobantesAfectados(
                 query = docReferencia,
                 docCliente = docReceptorEfectivo,
-                soloFacturas = esNotaCredito,
+                soloFacturas = true,
             )
+        }
+    }
+
+    val sugerenciasFacturasGre by remember(
+        comprobantesEmitidos,
+        busquedaFacturaGre,
+        docReceptorEfectivo,
+        facturasVinculadas,
+        esGuiaEmision,
+        tipo,
+    ) {
+        derivedStateOf {
+            if (!esGuiaEmision) return@derivedStateOf emptyList()
+            val busquedaActiva = busquedaFacturaGre.isNotBlank()
+            val docClienteListo = tipo.docReceptorListo(docReceptorEfectivo)
+            if (!busquedaActiva && !docClienteListo) return@derivedStateOf emptyList()
+            val vinculadas = facturasVinculadas.map { it.etiquetaCompleta.uppercase() }.toSet()
+            comprobantesEmitidos
+                .filtrarComprobantesAfectados(
+                    query = busquedaFacturaGre,
+                    docCliente = docReceptorEfectivo,
+                    soloFacturas = true,
+                )
+                .filter { it.etiquetaCompleta.uppercase() !in vinculadas }
         }
     }
 
@@ -434,6 +525,22 @@ fun EmitirComprobanteScreen(
     }
 
     fun aplicarComprobanteAfectado(invoice: Invoice) {
+        if (!invoice.esListableComoDocumentoAfectado(soloFacturas = true)) {
+            Toast.makeText(
+                context,
+                "Solo puedes afectar facturas electrónicas.",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        if (esNotaCredito && !invoice.esAfectablePorNotaCredito()) {
+            Toast.makeText(
+                context,
+                "Esta factura no tiene ítems disponibles: ya fueron devueltos o acreditados.",
+                Toast.LENGTH_LONG,
+            ).show()
+            return
+        }
         comprobanteAfectado = invoice
         docReferencia = invoice.etiquetaCompleta
         lineas = when {
@@ -442,6 +549,16 @@ fun EmitirComprobanteScreen(
             esNotaDebito && ajustePorItemsNd -> invoice.aLineasParaAcreditar(catalogo, almacenId.takeIf { it.isNotBlank() })
                 .prepararParaMotivoNd(motivoCodigoNd)
             else -> lineas
+        }
+        if (esNotaCredito && lineas.isEmpty()) {
+            Toast.makeText(
+                context,
+                "No quedan ítems activos en esta factura para acreditar.",
+                Toast.LENGTH_LONG,
+            ).show()
+            comprobanteAfectado = null
+            docReferencia = ""
+            return
         }
         if (esNotaFiscal && invoice.details.isEmpty()) {
             Toast.makeText(
@@ -469,16 +586,56 @@ fun EmitirComprobanteScreen(
         lineas = emptyList()
     }
 
+    fun resolverFacturaGrePorEtiqueta(etiqueta: String): Invoice? {
+        val parsed = Invoice.fromEtiqueta(etiqueta) ?: return null
+        return comprobantesEmitidos.find { inv ->
+            inv.etiquetaCompleta.equals(parsed.etiquetaCompleta, ignoreCase = true)
+        } ?: parsed
+    }
+
+    fun agregarFacturaVinculada(invoice: Invoice) {
+        if (!invoice.esListableComoDocumentoAfectado(soloFacturas = true)) {
+            Toast.makeText(
+                context,
+                "Solo puedes vincular facturas electrónicas emitidas por tu empresa.",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        if (facturasVinculadas.any { it.etiquetaCompleta.equals(invoice.etiquetaCompleta, ignoreCase = true) }) {
+            busquedaFacturaGre = ""
+            facturaEtiqueta = ""
+            return
+        }
+        facturasVinculadas = facturasVinculadas + invoice
+        busquedaFacturaGre = ""
+        facturaEtiqueta = ""
+        if (docReceptor.filter { it.isDigit() }.isBlank()) {
+            invoice.cliente?.let { cli ->
+                clienteSeleccionado = cli
+                docReceptor = cli.numeroDoc
+                nombreReceptor = cli.razonSocial
+            } ?: run {
+                val doc = invoice.receptor.documentoNumero.filter { it.isDigit() }
+                if (doc.isNotBlank()) {
+                    docReceptor = doc
+                    nombreReceptor = invoice.receptor.nombre
+                    clienteSeleccionado = clientes.buscarPorDocumento(doc)
+                }
+            }
+        }
+    }
+
     val totales = if (esNotaCredito && acreditacionPorMonto) {
         lineasNcConDescuento.calcularTotales()
     } else {
         lineas.calcularTotales()
     }
 
-    val receptor = remember(esBoleta, esFactura, esNotaCredito, clienteSeleccionado, docReceptor, nombreReceptor) {
+    val receptor = remember(esBoleta, esFactura, esNotaCredito, esNotaDebito, clienteSeleccionado, docReceptor, nombreReceptor) {
         receptorParaEmitir(
             esBoleta = esBoleta,
-            esFactura = esFactura || esNotaCredito,
+            esFactura = esFactura || esNotaCredito || esNotaDebito,
             cliente = clienteSeleccionado,
             docManual = docReceptor,
             nombreManual = nombreReceptor,
@@ -486,9 +643,9 @@ fun EmitirComprobanteScreen(
     }
     val receptorValido = receptor != null
     val docReceptorInvalido = when {
-        esFactura || esNotaCredito ->
+        esFactura || esNotaCredito || esNotaDebito ->
             docReceptor.isNotBlank() && docReceptor.length != 11
-        esNotaDebito || esGuiaEmision ->
+        esGuiaRemision ->
             docReceptor.isNotBlank() && !tipo.docReceptorListo(docReceptor)
         esBoleta ->
             docReceptor.isNotBlank() && !tipo.docReceptorListo(docReceptor)
@@ -498,13 +655,12 @@ fun EmitirComprobanteScreen(
     val labelDocCliente = when (tipo) {
         TipoComprobante.FACTURA -> "RUC del cliente"
         TipoComprobante.BOLETA -> "DNI del cliente"
-        TipoComprobante.GUIA_EMISION -> "RUC / DNI del destinatario"
-        TipoComprobante.NOTA_CREDITO -> "RUC del cliente"
-        TipoComprobante.NOTA_DEBITO -> "RUC / DNI del cliente"
+        TipoComprobante.GUIA_EMISION, TipoComprobante.GUIA_TRANSPORTISTA -> "RUC / DNI del destinatario"
+        TipoComprobante.NOTA_CREDITO, TipoComprobante.NOTA_DEBITO -> "RUC del cliente"
     }
     val labelNombre = when (tipo) {
         TipoComprobante.BOLETA -> "Nombre completo"
-        TipoComprobante.GUIA_EMISION -> "Razón social o nombre del destinatario"
+        TipoComprobante.GUIA_EMISION, TipoComprobante.GUIA_TRANSPORTISTA -> "Razón social o nombre del destinatario"
         else -> "Razón social o nombre"
     }
     val maxDocReceptor = when (tipo) {
@@ -515,13 +671,12 @@ fun EmitirComprobanteScreen(
     }
     val placeholderDocReceptor = when (tipo) {
         TipoComprobante.BOLETA -> "Ej. 45678901"
-        TipoComprobante.NOTA_DEBITO, TipoComprobante.GUIA_EMISION ->
-            "RUC 11 dígitos o DNI 8 dígitos"
+        TipoComprobante.GUIA_EMISION -> "RUC 11 dígitos o DNI 8 dígitos"
         else -> "Ej. 20123456789"
     }
     fun onDocReceptorChange(raw: String) {
         docReceptor = raw.filter { it.isDigit() }.take(maxDocReceptor)
-        if (esNotaCredito) {
+        if (esNotaCredito || esNotaDebito) {
             clienteSeleccionado = null
             limpiarComprobanteAfectado()
         } else if (!tipo.docReceptorListo(docReceptor)) {
@@ -529,9 +684,27 @@ fun EmitirComprobanteScreen(
         }
     }
 
+    val remitenteGre = remember(docRemitente, nombreRemitente) {
+        val doc = docRemitente.filter { it.isDigit() }
+        val nombre = nombreRemitente.trim()
+        if (doc.length !in listOf(8, 11) || nombre.isBlank()) null
+        else companyReceptor(
+            tipoDoc = if (doc.length == 11) TIPO_DOC_RUC else TIPO_DOC_DNI,
+            numeroDoc = doc,
+            nombre = nombre,
+        )
+    }
+    val remitenteGreValido = remitenteGre != null
+
     val puedeEmitir = !guardando && when {
         esGuiaEmision ->
-            facturasVinculadas.isNotEmpty() && receptorValido
+            facturasVinculadas.isNotEmpty() && receptorValido && llegadaGreValida
+        esGuiaTransportista ->
+            lineas.isNotEmpty() &&
+                lineas.lineasListasParaEmitir() &&
+                receptorValido &&
+                remitenteGreValido &&
+                (!puedeElegirAlmacen || almacenId.isNotBlank())
         esNotaCredito -> {
             val lineasEvaluadas = if (acreditacionPorMonto) lineasNcConDescuento else lineas
             val lineasNcOk = if (acreditacionPorMonto) {
@@ -612,6 +785,7 @@ fun EmitirComprobanteScreen(
             receptor = receptorEmitir,
             lineas = when {
                 esGuiaEmision -> emptyList()
+                esGuiaTransportista -> lineasEmitir.aEmitirLineas()
                 esNotaCredito -> {
                     val emitibles = if (acreditacionPorMonto) lineasNcConDescuento else lineasEmitir
                     emitibles.aEmitirLineas(incluirPrecio = acreditacionPorMonto)
@@ -632,6 +806,18 @@ fun EmitirComprobanteScreen(
                 null
             },
             facturas = facturasVinculadas.takeIf { esGuiaEmision },
+            remitente = remitenteGre.takeIf { esGuiaTransportista },
+            envio = if (esGuiaRemision) {
+                GreEnvioRequest(
+                    fechaTraslado = fechaTraslado.takeIf { it.isNotBlank() },
+                    pesoTotal = pesoTraslado.replace(',', '.').toDoubleOrNull(),
+                    vehiculo = placaVehiculo.takeIf { it.isNotBlank() }?.let { GreVehiculoRequest(placa = it.uppercase()) },
+                    llegada = llegadaGre?.takeIf { esGuiaEmision && it.validaParaGre },
+                )
+            } else {
+                null
+            },
+            guiaRemitente = Invoice.fromEtiqueta(greRemitenteRef.trim())?.takeIf { esGuiaTransportista },
             motivoNota = when {
                 esNotaCredito -> MotivosNotaCreditoSunat.porCodigo(motivoCodigoNc.orEmpty())?.descripcionSunat
                 esNotaDebito -> MotivosNotaDebitoSunat.porCodigo(motivoCodigoNd.orEmpty())?.descripcionSunat
@@ -728,8 +914,7 @@ fun EmitirComprobanteScreen(
     val seriesExcluidasEnOtrasLineas = remember(lineas, lineaSeriesLineaId) {
         lineas
             .filter { it.lineaId != lineaSeriesLineaId }
-            .flatMap { it.series }
-            .map { it.id }
+            .mapNotNull { it.productoSerie?.id }
             .toSet()
     }
 
@@ -748,8 +933,9 @@ fun EmitirComprobanteScreen(
             nombreReceptor = cli.razonSocial
             mostrarBuscarCliente = false
             busquedaCliente = ""
+            if (tipo.esNota) limpiarComprobanteAfectado()
         },
-        soloPersonasNaturales = true,
+        soloPersonasNaturales = esBoleta,
     )
 
     CatalogoBuscarSheet(
@@ -811,7 +997,7 @@ fun EmitirComprobanteScreen(
         almacenId = almacenId,
         token = token,
         catalogItem = lineaSeries?.catalogItem,
-        seriesIniciales = lineaSeries?.series.orEmpty(),
+        seriesIniciales = listOfNotNull(lineaSeries?.productoSerie),
         seriesExcluidasIds = seriesExcluidasEnOtrasLineas,
         seriesEntregadas = if (esNcDevolucionCantidad) {
             lineaSeries?.catalogItemId?.let { seriesEntregadasPorItem[it].orEmpty() } ?: emptyList()
@@ -821,19 +1007,18 @@ fun EmitirComprobanteScreen(
         onDismiss = { lineaSeriesLineaId = null },
         onConfirmar = { seleccionadas ->
             val lineaId = lineaSeries?.lineaId ?: return@SeleccionSeriesSheet
+            val base = lineaSeries ?: return@SeleccionSeriesSheet
             val almSalida = almacenId.takeIf { it.isNotBlank() }
-            lineas = lineas.map { linea ->
-                if (linea.lineaId == lineaId) {
-                    linea.copy(
-                        series = seleccionadas,
-                        numerosSerie = emptyList(),
-                        almacenId = almSalida ?: seleccionadas.firstOrNull()?.almacenId,
-                        cantidad = seleccionadas.size.toDouble(),
-                    )
-                } else {
-                    linea
-                }
+            val sinLinea = lineas.filter { it.lineaId != lineaId }
+            val nuevas = seleccionadas.map { serie ->
+                base.copy(
+                    lineaId = java.util.UUID.randomUUID().toString(),
+                    productoSerie = serie,
+                    cantidad = 1.0,
+                    almacenId = almSalida ?: serie.almacenId,
+                )
             }
+            lineas = if (nuevas.isEmpty()) sinLinea else sinLinea + nuevas
             lineaSeriesLineaId = null
         },
     )
@@ -891,7 +1076,7 @@ fun EmitirComprobanteScreen(
                 subtotal = totales.subtotal,
                 igv = totales.igv,
                 total = totales.total,
-                mostrarTotales = !esGuiaEmision,
+                mostrarTotales = !esGuiaRemision,
                 onEmitir = { emitirComprobante() },
             )
         },
@@ -937,7 +1122,7 @@ fun EmitirComprobanteScreen(
                             nombreReceptor = ""
                         },
                     )
-                    if ((esFactura || esNotaCredito) && !receptorValido) {
+                    if ((esFactura || esNotaCredito || esNotaDebito) && !receptorValido) {
                         Text(
                             text = "El cliente seleccionado debe tener un RUC de 11 dígitos.",
                             color = MaterialTheme.colorScheme.error,
@@ -957,12 +1142,14 @@ fun EmitirComprobanteScreen(
                     if (docReceptorInvalido) {
                         Text(
                             text = when {
-                                esNotaDebito || esGuiaEmision ->
-                                    "Ingresa un RUC (11 dígitos) o DNI (8 dígitos) válido."
                                 esBoleta ->
                                     "La boleta exige un DNI de 8 dígitos."
+                                esGuiaEmision ->
+                                    "Ingresa un RUC (11 dígitos) o DNI (8 dígitos) válido."
                                 esNotaCredito ->
                                     "La nota de crédito exige un RUC de 11 dígitos."
+                                esNotaDebito ->
+                                    "La nota de débito exige un RUC de 11 dígitos."
                                 else ->
                                     "La factura exige un RUC de 11 dígitos."
                             },
@@ -976,6 +1163,14 @@ fun EmitirComprobanteScreen(
                             esNotaCredito && doc.length in 1..10 -> {
                                 Text(
                                     text = "Ingresa el RUC completo (11 dígitos) del cliente.",
+                                    fontSize = 12.sp,
+                                    color = C.textSecondary,
+                                    modifier = Modifier.padding(start = 2.dp, top = 4.dp),
+                                )
+                            }
+                            esNotaDebito && doc.length in 1..10 -> {
+                                Text(
+                                    text = "Ingresa el RUC completo (11 dígitos) de la empresa.",
                                     fontSize = 12.sp,
                                     color = C.textSecondary,
                                     modifier = Modifier.padding(start = 2.dp, top = 4.dp),
@@ -1012,24 +1207,243 @@ fun EmitirComprobanteScreen(
 
             if (esGuiaEmision) {
                 EmitSeccionCard(
-                    icono = Icons.Default.ReceiptLong,
-                    titulo = "Facturas vinculadas",
-                    subtitulo = "Al menos una factura amparada por la guía",
+                    icono = Icons.Default.LocationOn,
+                    titulo = "Punto de llegada",
+                    subtitulo = "Ubicación del destinatario en la guía",
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Usar dirección del cliente",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.sp,
+                                color = C.textPrimary,
+                            )
+                            Text(
+                                text = "Desactiva si la mercadería va a otro lugar",
+                                fontSize = 12.sp,
+                                color = C.textSecondary,
+                                lineHeight = 17.sp,
+                            )
+                        }
+                        Switch(
+                            checked = usarDireccionClienteGre,
+                            onCheckedChange = { usar ->
+                                usarDireccionClienteGre = usar
+                                if (usar) {
+                                    direccionLlegadaGre = AddressFormState.fromAddress(clienteSeleccionado?.address)
+                                }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = C.accent,
+                                checkedTrackColor = C.accentSoft,
+                            ),
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    if (usarDireccionClienteGre) {
+                        AddressResumenCard(
+                            address = clienteSeleccionado?.address,
+                            accentColor = C.accent,
+                            textColor = C.textSecondary,
+                        )
+                        if (clienteSeleccionado?.address?.validaParaGre != true) {
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = "El cliente no tiene dirección completa (ubigeo y calle). Regístrala en Clientes o desactiva el interruptor para indicar otra.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.error,
+                                lineHeight = 17.sp,
+                            )
+                        }
+                    } else {
+                        AddressFormFields(
+                            state = direccionLlegadaGre,
+                            onStateChange = { direccionLlegadaGre = it },
+                            labelColor = C.textPrimary,
+                            borderColor = C.border,
+                            accentColor = C.accent,
+                        )
+                    }
+                    if (!llegadaGreValida) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "Indica ubigeo (6 dígitos) y dirección para el punto de llegada.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.error,
+                            lineHeight = 17.sp,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+
+            if (esGuiaTransportista) {
+                EmitSeccionCard(
+                    icono = Icons.Default.Outbox,
+                    titulo = "Remitente",
+                    subtitulo = "Quien envía las mercancías (cat. SUNAT)",
                 ) {
                     EmitCampo(
+                        value = docRemitente,
+                        onValueChange = { docRemitente = it.filter { c -> c.isDigit() }.take(11) },
+                        label = "RUC / DNI del remitente",
+                        placeholder = "Ej. 20123456789",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    EmitCampo(
+                        value = nombreRemitente,
+                        onValueChange = { nombreRemitente = it },
+                        label = "Razón social del remitente",
+                        placeholder = "Nombre o razón social",
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    EmitCampo(
+                        value = greRemitenteRef,
+                        onValueChange = { greRemitenteRef = it.uppercase() },
+                        label = "GRE remitente vinculada (opcional)",
+                        placeholder = "T001-00001234",
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+                EmitSeccionCard(
+                    icono = Icons.Default.LocalShipping,
+                    titulo = "Datos del traslado",
+                    subtitulo = "Fecha, peso y vehículo",
+                ) {
+                    EmitCampo(
+                        value = fechaTraslado,
+                        onValueChange = { fechaTraslado = it },
+                        label = "Fecha de traslado",
+                        placeholder = "YYYY-MM-DD",
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    EmitCampo(
+                        value = pesoTraslado,
+                        onValueChange = { pesoTraslado = it.filter { c -> c.isDigit() || c == '.' } },
+                        label = "Peso total (KGM)",
+                        placeholder = "Ej. 25.5",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    EmitCampo(
+                        value = placaVehiculo,
+                        onValueChange = { placaVehiculo = it.uppercase() },
+                        label = "Placa del vehículo",
+                        placeholder = "Ej. ABC123",
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+
+            if (esGuiaEmision) {
+                EmitSeccionCard(
+                    icono = Icons.Default.ReceiptLong,
+                    titulo = "Facturas vinculadas",
+                    subtitulo = "Tus facturas emitidas · al menos una ampara la guía",
+                ) {
+                    ComprobanteAfectadoPeriodoFiltros(
+                        preset = presetPeriodoAfectado,
+                        onPreset = { presetPeriodoAfectado = it },
+                        onElegirFecha = { mostrarDatePickerAfectado = true },
+                        hoy = hoyComprobantes,
+                        fechaElegida = fechaAfectadoElegida,
+                        cantidadVisible = sugerenciasFacturasGre.size,
+                        cargando = cargandoComprobantes,
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    ComprobanteAfectadoBuscarField(
+                        value = busquedaFacturaGre,
+                        onValueChange = { busquedaFacturaGre = it },
+                        sugerencias = sugerenciasFacturasGre,
+                        cargando = cargandoComprobantes,
+                        comprobanteSeleccionado = null,
+                        onSeleccionar = { agregarFacturaVinculada(it) },
+                        onLimpiarSeleccion = {},
+                        label = "Buscar factura emitida",
+                        placeholder = "Ej. 1234 (solo número) o F001-1234…",
+                        tituloSugerencias = when {
+                            busquedaFacturaGre.isNotBlank() -> "Facturas emitidas"
+                            else -> "Facturas del destinatario"
+                        },
+                        mensajeSinCoincidencias = "Sin facturas emitidas que coincidan con tu búsqueda.",
+                        docClienteListo = tipo.docReceptorListo(docReceptorEfectivo),
+                    )
+                    if (sugerenciasFacturasGre.isEmpty() && !cargandoComprobantes) {
+                        when {
+                            tipo.docReceptorListo(docReceptorEfectivo) -> {
+                                Text(
+                                    text = "No hay facturas emitidas en este periodo para este destinatario.",
+                                    fontSize = 12.sp,
+                                    color = C.textSecondary,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                                )
+                            }
+                            busquedaFacturaGre.isBlank() -> {
+                                Text(
+                                    text = "Ingresa el destinatario arriba para ver sus facturas, o busca por número.",
+                                    fontSize = 12.sp,
+                                    color = C.textSecondary,
+                                    lineHeight = 17.sp,
+                                    modifier = Modifier.padding(top = 6.dp, bottom = 4.dp),
+                                )
+                            }
+                        }
+                        when (presetPeriodoAfectado) {
+                            PresetPeriodoComprobante.HOY -> {
+                                TextButton(onClick = { presetPeriodoAfectado = PresetPeriodoComprobante.ULTIMOS_7 }) {
+                                    Text("Ampliar a últimos 7 días", color = C.accent)
+                                }
+                            }
+                            PresetPeriodoComprobante.AYER -> {
+                                TextButton(onClick = { presetPeriodoAfectado = PresetPeriodoComprobante.ULTIMOS_7 }) {
+                                    Text("Ampliar a últimos 7 días", color = C.accent)
+                                }
+                            }
+                            PresetPeriodoComprobante.ULTIMOS_7 -> {
+                                TextButton(onClick = { presetPeriodoAfectado = PresetPeriodoComprobante.ESTE_MES }) {
+                                    Text("Ampliar a este mes", color = C.accent)
+                                }
+                            }
+                            else -> Unit
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    HorizontalDivider(color = C.border.copy(alpha = 0.5f))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "O escribe serie y número manualmente",
+                        fontSize = 12.sp,
+                        color = C.textSecondary,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(start = 2.dp),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    EmitCampo(
                         value = facturaEtiqueta,
-                        onValueChange = { facturaEtiqueta = it },
+                        onValueChange = { facturaEtiqueta = it.uppercase() },
                         label = "Serie y número",
                         placeholder = "F001-00001234",
                     )
                     Spacer(modifier = Modifier.height(10.dp))
                     Surface(
                         onClick = {
-                            val ref = Invoice.fromEtiqueta(facturaEtiqueta) ?: return@Surface
-                            if (facturasVinculadas.none { it.etiqueta == ref.etiqueta }) {
-                                facturasVinculadas = facturasVinculadas + ref
+                            val ref = resolverFacturaGrePorEtiqueta(facturaEtiqueta.trim())
+                            if (ref == null) {
+                                Toast.makeText(
+                                    context,
+                                    "Formato inválido. Usa F001-00001234",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                                return@Surface
                             }
-                            facturaEtiqueta = ""
+                            agregarFacturaVinculada(ref)
                         },
                         enabled = Invoice.fromEtiqueta(facturaEtiqueta) != null,
                         shape = RoundedCornerShape(12.dp),
@@ -1050,7 +1464,7 @@ fun EmitirComprobanteScreen(
                     }
                     if (facturasVinculadas.isEmpty()) {
                         Text(
-                            text = "La guía debe incluir al menos una factura electrónica.",
+                            text = "La guía debe incluir al menos una factura electrónica emitida por tu empresa.",
                             fontSize = 12.sp,
                             color = C.textSecondary,
                             lineHeight = 17.sp,
@@ -1058,11 +1472,20 @@ fun EmitirComprobanteScreen(
                         )
                     } else {
                         Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "${facturasVinculadas.size} factura(s) vinculada(s)",
+                            fontSize = 12.sp,
+                            color = C.accent,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
                         facturasVinculadas.forEach { ref ->
                             FacturaVinculadaCard(
                                 referencia = ref,
                                 onEliminar = {
-                                    facturasVinculadas = facturasVinculadas.filter { it.etiqueta != ref.etiqueta }
+                                    facturasVinculadas = facturasVinculadas.filter {
+                                        !it.etiquetaCompleta.equals(ref.etiquetaCompleta, ignoreCase = true)
+                                    }
                                 },
                             )
                             Spacer(modifier = Modifier.height(6.dp))
@@ -1077,7 +1500,7 @@ fun EmitirComprobanteScreen(
                     titulo = "Documento afectado",
                     subtitulo = when {
                         esNotaCredito -> "Facturas del periodo seleccionado · filtra por número o cliente"
-                        esNotaDebito -> "Comprobantes del periodo · filtra por número o cliente"
+                        esNotaDebito -> "Facturas del periodo seleccionado · filtra por número o cliente"
                         else -> "Comprobante original y motivo"
                     },
                 ) {
@@ -1099,24 +1522,15 @@ fun EmitirComprobanteScreen(
                         comprobanteSeleccionado = comprobanteAfectado,
                         onSeleccionar = { aplicarComprobanteAfectado(it) },
                         onLimpiarSeleccion = { limpiarComprobanteAfectado() },
-                        label = if (esNotaDebito) "Comprobante afectado" else "Factura afectada",
-                        placeholder = if (esNotaDebito) {
-                            "Ej. 1234, B001-1234 o nombre del cliente…"
-                        } else {
-                            "Ej. 1234 (solo número) o F001-1234…"
-                        },
+                        label = "Factura afectada",
+                        placeholder = "Ej. 1234 (solo número) o F001-1234…",
                         tituloSugerencias = when {
-                            docReferencia.isNotBlank() && esNotaDebito -> "Comprobantes"
                             docReferencia.isNotBlank() -> "Facturas"
-                            esNotaDebito -> "Comprobantes del cliente"
                             else -> "Facturas del cliente"
                         },
-                        mensajeSinCoincidencias = if (esNotaDebito) {
-                            "Sin comprobantes que coincidan con tu búsqueda."
-                        } else {
-                            "Sin facturas que coincidan con tu búsqueda."
-                        },
+                        mensajeSinCoincidencias = "Sin facturas que coincidan con tu búsqueda.",
                         docClienteListo = tipo.docReceptorListo(docReceptorEfectivo),
+                        mostrarLineasDisponiblesNc = esNotaCredito,
                     )
                     if (docReferenciaValida && lineas.isNotEmpty()) {
                         Text(
@@ -1136,11 +1550,7 @@ fun EmitirComprobanteScreen(
                         when {
                             tipo.docReceptorListo(docReceptorEfectivo) -> {
                                 Text(
-                                    text = if (esNotaDebito) {
-                                        "No hay comprobantes en este periodo para este documento."
-                                    } else {
-                                        "No hay facturas en este periodo para este RUC."
-                                    },
+                                    text = "No hay facturas en este periodo para este documento.",
                                     fontSize = 12.sp,
                                     color = C.textSecondary,
                                     lineHeight = 17.sp,
@@ -1149,7 +1559,13 @@ fun EmitirComprobanteScreen(
                             }
                             docReferencia.isBlank() -> {
                                 Text(
-                                    text = "No hay comprobantes en el periodo seleccionado. Amplía el rango o busca por número.",
+                                    text = if (
+                                        tipo.esNota && !tipo.docReceptorListo(docReceptorEfectivo)
+                                    ) {
+                                        "Selecciona una empresa con RUC para ver sus facturas."
+                                    } else {
+                                        "No hay facturas en el periodo seleccionado. Amplía el rango o busca por número."
+                                    },
                                     fontSize = 12.sp,
                                     color = C.textSecondary,
                                     lineHeight = 17.sp,
@@ -1962,29 +2378,12 @@ private fun LineaItemCard(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (linea.series.isNotEmpty()) {
-                                "${linea.series.size} serie(s) seleccionada(s)"
-                            } else {
-                                "Sin series seleccionadas"
-                            },
+                            text = linea.productoSerie?.numeroSerie?.let { "Serie: $it" }
+                                ?: "Sin serie seleccionada",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = C.textSecondary,
                         )
-                        linea.series.take(3).forEach { serie ->
-                            Text(
-                                text = "• ${serie.numeroSerie}",
-                                fontSize = 12.sp,
-                                color = C.textPrimary,
-                            )
-                        }
-                        if (linea.series.size > 3) {
-                            Text(
-                                text = "… y ${linea.series.size - 3} más",
-                                fontSize = 11.sp,
-                                color = C.textSecondary,
-                            )
-                        }
                     }
                     IconButton(onClick = onAbrirSeries) {
                         Icon(Icons.Default.MoreHoriz, "Elegir series", tint = C.accent)
@@ -2224,6 +2623,7 @@ private fun TipoComprobante.icono(): ImageVector = when (this) {
     TipoComprobante.NOTA_CREDITO -> Icons.AutoMirrored.Filled.Undo
     TipoComprobante.NOTA_DEBITO -> Icons.Default.Add
     TipoComprobante.GUIA_EMISION -> Icons.Default.LocalShipping
+    TipoComprobante.GUIA_TRANSPORTISTA -> Icons.Default.LocalShipping
 }
 
 @Composable

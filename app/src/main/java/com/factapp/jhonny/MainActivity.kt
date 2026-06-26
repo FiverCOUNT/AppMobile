@@ -104,7 +104,7 @@ class MainActivity : FragmentActivity() {
 
     data object Compras : Pantalla
 
-    data object ComprobantesEmitidos : Pantalla
+    data class ComprobantesEmitidos(val comprobanteIdFocus: String? = null) : Pantalla
 
     data object Salidas : Pantalla
 
@@ -122,12 +122,17 @@ class MainActivity : FragmentActivity() {
 
     data class EmitirComprobante(val tipo: TipoComprobante) : Pantalla
 
+    data class GuiaRemisionEventos(
+        val modo: com.factapp.jhonny.GuiaRemisionEventoOpcion =
+            com.factapp.jhonny.GuiaRemisionEventoOpcion.REGISTRO_EVENTOS,
+    ) : Pantalla
+
   }
 
 
 
   private fun Pantalla.mostrarBottomBar(): Boolean = when (this) {
-    Pantalla.Login, is Pantalla.EmitirComprobante, is Pantalla.NuevaSalida -> false
+    Pantalla.Login, is Pantalla.EmitirComprobante, is Pantalla.GuiaRemisionEventos, is Pantalla.NuevaSalida -> false
     else -> true
   }
 
@@ -135,7 +140,7 @@ class MainActivity : FragmentActivity() {
 
   private fun Pantalla.tabBottomBar(): Int = when (this) {
 
-    Pantalla.ComprobantesEmitidos -> AppBottomNavTabs.COMPROBANTES
+    is Pantalla.ComprobantesEmitidos -> AppBottomNavTabs.COMPROBANTES
 
     Pantalla.Configuracion -> AppBottomNavTabs.AJUSTES
 
@@ -187,6 +192,12 @@ class MainActivity : FragmentActivity() {
 
         }
 
+        fun abrirComprobanteVenta(comprobanteId: String) {
+
+          pantalla = Pantalla.ComprobantesEmitidos(comprobanteIdFocus = comprobanteId)
+
+        }
+
 
 
         Scaffold(
@@ -225,7 +236,7 @@ class MainActivity : FragmentActivity() {
 
                   pantallaAnterior = Pantalla.Dashboard
 
-                  pantalla = Pantalla.ComprobantesEmitidos
+                  pantalla = Pantalla.ComprobantesEmitidos()
 
                 },
 
@@ -345,6 +356,12 @@ class MainActivity : FragmentActivity() {
 
                     },
 
+                    onGuiaRemisionEventos = { modo ->
+
+                      pantalla = Pantalla.GuiaRemisionEventos(modo)
+
+                    },
+
                     onCompras = {
 
                       pantallaAnterior = Pantalla.Dashboard
@@ -381,7 +398,7 @@ class MainActivity : FragmentActivity() {
 
                       pantallaAnterior = Pantalla.Dashboard
 
-                      pantalla = Pantalla.ComprobantesEmitidos
+                      pantalla = Pantalla.ComprobantesEmitidos()
 
                     },
 
@@ -407,11 +424,15 @@ class MainActivity : FragmentActivity() {
 
 
 
-              Pantalla.ComprobantesEmitidos -> {
+              is Pantalla.ComprobantesEmitidos -> {
                 ComprobantesEmitidosScreen(
                   modifier = Modifier.fillMaxSize(),
                   usuario = usuarioSesion,
                   onVolver = null,
+                  comprobanteIdFocus = actual.comprobanteIdFocus,
+                  onComprobanteFocusClear = {
+                    pantalla = Pantalla.ComprobantesEmitidos(comprobanteIdFocus = null)
+                  },
                 )
               }
 
@@ -507,6 +528,8 @@ class MainActivity : FragmentActivity() {
 
                   },
 
+                  onAbrirComprobanteVenta = { id -> abrirComprobanteVenta(id) },
+
                 )
 
               }
@@ -554,6 +577,8 @@ class MainActivity : FragmentActivity() {
                     pantalla = Pantalla.NuevaSalida()
 
                   },
+
+                  onAbrirComprobanteVenta = { id -> abrirComprobanteVenta(id) },
 
                 )
 
@@ -626,6 +651,8 @@ class MainActivity : FragmentActivity() {
                       pantalla = Pantalla.Catalogo
 
                     },
+
+                    onAbrirComprobanteVenta = { id -> abrirComprobanteVenta(id) },
 
                   )
 
@@ -722,6 +749,22 @@ class MainActivity : FragmentActivity() {
                     pantalla = Pantalla.Dashboard
 
                   },
+
+                )
+
+              }
+
+              is Pantalla.GuiaRemisionEventos -> {
+
+                com.factapp.jhonny.ui.emitir.GuiaRemisionEventosScreen(
+
+                  modifier = Modifier.fillMaxSize(),
+
+                  usuario = usuarioSesion,
+
+                  modoInicial = actual.modo,
+
+                  onVolver = { irAlDashboard() },
 
                 )
 

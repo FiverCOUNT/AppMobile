@@ -67,6 +67,8 @@ import androidx.compose.ui.unit.sp
 import com.factapp.jhonny.network.dto.model.Address
 import com.factapp.jhonny.network.dto.request.CrearClienteRequest
 import com.factapp.jhonny.network.dto.model.dniValido
+import com.factapp.jhonny.ui.components.AddressFormFields
+import com.factapp.jhonny.ui.components.AddressFormState
 import com.factapp.jhonny.ui.components.sheetContentWithoutTopInset
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -99,12 +101,11 @@ fun AgregarClienteSheet(
     var dni by remember { mutableStateOf("") }
     var nombre by remember { mutableStateOf("") }
     var telefono by remember { mutableStateOf("") }
-    var direccion by remember { mutableStateOf("") }
+    var direccionState by remember { mutableStateOf(AddressFormState()) }
 
     val focusDni = remember { FocusRequester() }
     val focusNombre = remember { FocusRequester() }
     val focusTelefono = remember { FocusRequester() }
-    val focusDireccion = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
     LaunchedEffect(visible) {
@@ -112,7 +113,7 @@ fun AgregarClienteSheet(
             dni = ""
             nombre = ""
             telefono = ""
-            direccion = ""
+            direccionState = AddressFormState()
             delay(350)
             focusDni.requestFocus()
         }
@@ -130,7 +131,7 @@ fun AgregarClienteSheet(
                 numeroDoc = dniLimpio,
                 razonSocial = nombre.trim(),
                 telefono = telefono.trim().takeIf { it.isNotBlank() },
-                address = direccion.trim().takeIf { it.isNotBlank() }?.let { Address.linea(it) },
+                address = direccionState.toAddress(),
             ),
         )
     }
@@ -291,32 +292,56 @@ fun AgregarClienteSheet(
                     value = telefono,
                     onValueChange = { telefono = it },
                     focusRequester = focusTelefono,
-                    imeAction = ImeAction.Next,
+                    imeAction = ImeAction.Done,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     keyboardActions = KeyboardActions(
-                        onNext = { focusDireccion.requestFocus() },
+                        onDone = { focusManager.clearFocus() },
                     ),
                 )
 
                 Spacer(Modifier.height(16.dp))
 
-                NuevoClienteCampo(
-                    icon = Icons.Default.LocationOn,
-                    label = "Dirección",
-                    placeholder = "Distrito, ciudad (opcional)",
-                    value = direccion,
-                    onValueChange = { direccion = it },
-                    focusRequester = focusDireccion,
-                    imeAction = ImeAction.Done,
-                    keyboardActions = KeyboardActions(
-                        onDone = {
-                            focusManager.clearFocus()
-                            guardarCliente()
-                        },
-                    ),
-                    singleLine = false,
-                    minLines = 2,
-                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(NuevoClienteTheme.surface)
+                        .border(1.dp, NuevoClienteTheme.borde.copy(alpha = 0.55f), RoundedCornerShape(18.dp))
+                        .padding(16.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = NuevoClienteTheme.azulDeep,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Dirección",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                color = NuevoClienteTheme.ink,
+                            )
+                            Text(
+                                text = "Opcional · ubigeo, departamento, provincia, distrito y calle",
+                                fontSize = 11.sp,
+                                color = NuevoClienteTheme.inkMuted,
+                                lineHeight = 15.sp,
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    AddressFormFields(
+                        state = direccionState,
+                        onStateChange = { direccionState = it },
+                        labelColor = NuevoClienteTheme.ink,
+                        borderColor = NuevoClienteTheme.borde,
+                        accentColor = NuevoClienteTheme.azul,
+                        surfaceColor = Color.White,
+                    )
+                }
 
                 error?.let { msg ->
                     Spacer(Modifier.height(16.dp))

@@ -10,10 +10,13 @@ fun Invoice.etiquetaTipo(): String = when (tipo) {
     InvoiceTipoDoc.NOTA_CREDITO -> "Nota de crédito"
     InvoiceTipoDoc.NOTA_DEBITO -> "Nota de débito"
     InvoiceTipoDoc.GUIA_EMISION -> "Guía de remisión"
+    InvoiceTipoDoc.GUIA_TRANSPORTISTA -> "GRE transportista"
     InvoiceTipoDoc.COD_FACTURA -> "Factura"
     InvoiceTipoDoc.COD_BOLETA -> "Boleta"
     InvoiceTipoDoc.COD_NOTA_CREDITO -> "Nota de crédito"
     InvoiceTipoDoc.COD_NOTA_DEBITO -> "Nota de débito"
+    InvoiceTipoDoc.COD_GUIA -> "Guía de remisión"
+    InvoiceTipoDoc.COD_GUIA_TRANSPORTISTA -> "GRE transportista"
     else -> tipo.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() }
 }
 

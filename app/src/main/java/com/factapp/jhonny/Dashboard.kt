@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -48,6 +47,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -93,6 +93,8 @@ import com.factapp.jhonny.ui.components.scaffoldContentWithoutTopInset
 import com.factapp.jhonny.ui.components.PartialOptionCard
 import com.factapp.jhonny.ui.components.PartialOptionsBottomSheet
 import com.factapp.jhonny.ui.components.PartialSheetTheme
+import com.factapp.jhonny.ui.emitir.GuiaRemisionEventosSheet
+import com.factapp.jhonny.ui.emitir.GuiaRemisionOpcionesSheet
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
 import com.factapp.jhonny.ui.theme.EasyTheme
 import androidx.compose.foundation.BorderStroke
@@ -208,6 +210,7 @@ fun DashboardScreen(
     onCatalogo: () -> Unit = {},
     onVerMasResumen: () -> Unit = {},
     onEmitirComprobante: (TipoComprobante) -> Unit = {},
+    onGuiaRemisionEventos: (GuiaRemisionEventoOpcion) -> Unit = {},
     onCompras: () -> Unit = {},
     onSalidas: () -> Unit = {},
     onIngresos: () -> Unit = {},
@@ -219,6 +222,8 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
     var mostrarMenuEmitir by remember { mutableStateOf(false) }
+    var mostrarMenuGuiaRemision by remember { mutableStateOf(false) }
+    var mostrarMenuGuiaEventos by remember { mutableStateOf(false) }
     var mostrarMenuMas by remember { mutableStateOf(false) }
     var refrescando by remember { mutableStateOf(false) }
     var cargandoInicial by remember { mutableStateOf(true) }
@@ -428,9 +433,43 @@ fun DashboardScreen(
                     mostrarMenuEmitir = false
                     onEmitirComprobante(tipo)
                 },
+                onAbrirGuiaRemision = {
+                    mostrarMenuEmitir = false
+                    mostrarMenuGuiaRemision = true
+                },
             )
         }
     }
+
+    GuiaRemisionOpcionesSheet(
+        visible = mostrarMenuGuiaRemision,
+        onDismiss = { mostrarMenuGuiaRemision = false },
+        onOpcion = { opcion ->
+            when (opcion) {
+                GuiaRemisionOpcion.REMITENTE -> {
+                    mostrarMenuGuiaRemision = false
+                    onEmitirComprobante(TipoComprobante.GUIA_EMISION)
+                }
+                GuiaRemisionOpcion.TRANSPORTISTA -> {
+                    mostrarMenuGuiaRemision = false
+                    onEmitirComprobante(TipoComprobante.GUIA_TRANSPORTISTA)
+                }
+                GuiaRemisionOpcion.EVENTOS -> {
+                    mostrarMenuGuiaRemision = false
+                    mostrarMenuGuiaEventos = true
+                }
+            }
+        },
+    )
+
+    GuiaRemisionEventosSheet(
+        visible = mostrarMenuGuiaEventos,
+        onDismiss = { mostrarMenuGuiaEventos = false },
+        onEvento = { evento ->
+            mostrarMenuGuiaEventos = false
+            onGuiaRemisionEventos(evento)
+        },
+    )
 
     if (mostrarMenuMas) {
         PartialOptionsBottomSheet(
@@ -479,7 +518,7 @@ private fun MenuMasOpciones(
         PartialOptionCard(
             icon = Icons.Default.ShoppingCart,
             titulo = "Compras",
-            detalle = "Compras registradas como empresa",
+            detalle = "Comprobantes que otras empresas te emitieron",
             theme = PartialSheetTheme.Dashboard,
             iconTint = Color(0xFFEF6C00),
             iconBackground = Color(0xFFFFE0B2),
@@ -541,8 +580,12 @@ private fun MenuMasOpciones(
 private fun MenuEmitirComprobanteOpciones(
     context: android.content.Context,
     onTipoSeleccionado: (TipoComprobante) -> Unit,
+    onAbrirGuiaRemision: () -> Unit,
 ) {
-    TipoComprobante.entries.forEachIndexed { index, tipo ->
+    val tiposDirectos = TipoComprobante.entries.filter {
+        it != TipoComprobante.GUIA_EMISION && it != TipoComprobante.GUIA_TRANSPORTISTA
+    }
+    tiposDirectos.forEachIndexed { index, tipo ->
         if (index > 0) Spacer(modifier = Modifier.height(10.dp))
         val colores = tipo.emitirMenuColors()
         PartialOptionCard(
@@ -556,6 +599,18 @@ private fun MenuEmitirComprobanteOpciones(
             onClick = { onTipoSeleccionado(tipo) },
         )
     }
+    Spacer(modifier = Modifier.height(10.dp))
+    val coloresGuia = TipoComprobante.GUIA_EMISION.emitirMenuColors()
+    PartialOptionCard(
+        icon = Icons.Default.LocalShipping,
+        titulo = "Guía de remisión",
+        detalle = "GRE remitente, transportista y eventos · SUNAT",
+        theme = PartialSheetTheme.Emit,
+        iconTint = coloresGuia.iconTint,
+        iconBackground = coloresGuia.iconBackground,
+        tituloColor = coloresGuia.title,
+        onClick = onAbrirGuiaRemision,
+    )
 }
 
 private data class EmitirMenuColors(
@@ -570,6 +625,7 @@ private fun TipoComprobante.emitirMenuIcon(): ImageVector = when (this) {
     TipoComprobante.NOTA_CREDITO -> Icons.Default.History
     TipoComprobante.NOTA_DEBITO -> Icons.Default.Add
     TipoComprobante.GUIA_EMISION -> Icons.Default.LocalShipping
+    TipoComprobante.GUIA_TRANSPORTISTA -> Icons.Default.LocalShipping
 }
 
 private fun TipoComprobante.emitirMenuColors(): EmitirMenuColors = when (this) {
@@ -598,6 +654,11 @@ private fun TipoComprobante.emitirMenuColors(): EmitirMenuColors = when (this) {
         iconBackground = Color(0xFFB2EBF2),
         title = Color(0xFF006064),
     )
+    TipoComprobante.GUIA_TRANSPORTISTA -> EmitirMenuColors(
+        iconTint = Color(0xFFEF6C00),
+        iconBackground = Color(0xFFFFE0B2),
+        title = Color(0xFFE65100),
+    )
 }
 
 @Composable
@@ -612,94 +673,68 @@ private fun DashboardTopHeader(
             .fillMaxWidth()
             .background(barColor),
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 16.dp)
-                .padding(top = 8.dp, bottom = 16.dp),
-        ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "Hola, $nombreSaludo",
+            Column(
                 modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleLarge.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = ComprobanteEmitColors.onPrimary,
-                ),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
-                HeaderIconActionLight(
-                    icon = Icons.Default.Refresh,
-                    label = "Actualizar",
-                    onClick = onRefresh,
-                    enabled = !refrescando,
+                Text(
+                    text = "Hola,",
+                    fontSize = 14.sp,
+                    color = ComprobanteEmitColors.onPrimary.copy(alpha = 0.85f),
+                    fontWeight = FontWeight.Medium,
                 )
-                HeaderIconActionLight(
-                    icon = Icons.Default.Menu,
-                    label = "Menú",
+                Text(
+                    text = nombreSaludo,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleLarge.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = ComprobanteEmitColors.onPrimary,
+                        lineHeight = 26.sp,
+                    ),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Resumen de tu negocio",
+                    fontSize = 13.sp,
+                    color = ComprobanteEmitColors.onPrimary.copy(alpha = 0.78f),
+                    fontWeight = FontWeight.Normal,
+                    lineHeight = 18.sp,
                 )
             }
+            Spacer(modifier = Modifier.width(12.dp))
+            Surface(
+                shape = CircleShape,
+                color = ComprobanteEmitColors.onPrimary.copy(alpha = 0.16f),
+            ) {
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !refrescando,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    if (refrescando) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                            color = ComprobanteEmitColors.onPrimary,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Actualizar",
+                            tint = ComprobanteEmitColors.onPrimary,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+            }
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "Resumen de tu negocio",
-            fontSize = 14.sp,
-            color = ComprobanteEmitColors.onPrimary.copy(alpha = 0.9f),
-            fontWeight = FontWeight.Medium,
-        )
-        }
-    }
-}
-
-@Composable
-private fun HeaderIconActionLight(
-    icon: ImageVector,
-    label: String,
-    onClick: (() -> Unit)? = null,
-    enabled: Boolean = true,
-) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .widthIn(min = 48.dp, max = 56.dp)
-            .padding(horizontal = 2.dp)
-            .then(
-                if (onClick != null && enabled) Modifier.clickable(onClick = onClick)
-                else Modifier,
-            ),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = if (enabled) {
-                ComprobanteEmitColors.onPrimary
-            } else {
-                ComprobanteEmitColors.onPrimary.copy(alpha = 0.45f)
-            },
-            modifier = Modifier.size(24.dp),
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = label,
-            fontSize = 10.sp,
-            color = if (enabled) {
-                ComprobanteEmitColors.onPrimary.copy(alpha = 0.9f)
-            } else {
-                ComprobanteEmitColors.onPrimary.copy(alpha = 0.45f)
-            },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 

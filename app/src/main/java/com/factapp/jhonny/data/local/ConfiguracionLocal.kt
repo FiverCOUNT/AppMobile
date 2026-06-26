@@ -62,6 +62,7 @@ fun TipoComprobante.tipoDocSunat(): String = when (this) {
     TipoComprobante.NOTA_CREDITO -> "07"
     TipoComprobante.NOTA_DEBITO -> "08"
     TipoComprobante.GUIA_EMISION -> "09"
+    TipoComprobante.GUIA_TRANSPORTISTA -> "31"
 }
 
 fun TipoComprobante.serieConfigurada(context: Context): String =

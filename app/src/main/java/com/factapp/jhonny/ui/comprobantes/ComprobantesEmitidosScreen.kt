@@ -1,18 +1,22 @@
 package com.factapp.jhonny.ui.comprobantes
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -80,6 +84,9 @@ import com.factapp.jhonny.ui.compras.CompraDetalleSheet
 import com.factapp.jhonny.ui.compras.ComprobanteDocumentIntents
 import com.factapp.jhonny.ui.components.AppEmitScaffold
 import com.factapp.jhonny.ui.theme.ComprobanteEmitColors
+import com.factapp.jhonny.ui.theme.LeyendaTiposComprobante
+import com.factapp.jhonny.ui.theme.filtrarPorTipo
+import com.factapp.jhonny.ui.theme.tipoPalette
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -129,6 +136,8 @@ fun ComprobantesEmitidosScreen(
     modifier: Modifier = Modifier,
     usuario: Usuario? = null,
     onVolver: (() -> Unit)? = null,
+    comprobanteIdFocus: String? = null,
+    onComprobanteFocusClear: (() -> Unit)? = null,
 ) {
     BackHandler(enabled = onVolver != null, onBack = { onVolver?.invoke() })
 
@@ -146,6 +155,17 @@ fun ComprobantesEmitidosScreen(
     var mostrarDatePicker by remember { mutableStateOf(false) }
     var detalle by remember { mutableStateOf<Invoice?>(null) }
     var refreshKey by remember { mutableStateOf(0) }
+    var tipoFiltro by remember { mutableStateOf<String?>(null) }
+    var autoDetalleAbierto by remember(comprobanteIdFocus) { mutableStateOf(false) }
+
+    LaunchedEffect(comprobanteIdFocus) {
+        if (!comprobanteIdFocus.isNullOrBlank()) {
+            preset = PresetFecha.TODOS
+            busqueda = ""
+            tipoFiltro = null
+            autoDetalleAbierto = false
+        }
+    }
 
     val rango by remember(preset, fechaElegida, hoy) {
         derivedStateOf { preset.rango(hoy, fechaElegida) }
@@ -181,19 +201,48 @@ fun ComprobantesEmitidosScreen(
         }
     }
 
-    val filtradas by remember(porFecha, busqueda) {
-        derivedStateOf { porFecha.filtrarBusqueda(busqueda) }
+    val filtradas by remember(porFecha, busqueda, tipoFiltro, comprobanteIdFocus) {
+        derivedStateOf {
+            val base = porFecha
+                .filtrarBusqueda(busqueda)
+                .filtrarPorTipo(tipoFiltro)
+            val focusId = comprobanteIdFocus?.trim().orEmpty()
+            if (focusId.isBlank()) base
+            else base.filter { it.id == focusId }
+        }
     }
 
-    val subtituloHeader by remember(filtradas.size, rango, preset) {
+    LaunchedEffect(todos, comprobanteIdFocus, cargando, autoDetalleAbierto) {
+        val focusId = comprobanteIdFocus?.trim().orEmpty()
+        if (focusId.isBlank() || cargando || autoDetalleAbierto) return@LaunchedEffect
+        todos.find { it.id == focusId }?.let { doc ->
+            detalle = doc
+            autoDetalleAbierto = true
+        }
+    }
+
+    val subtituloHeader by remember(filtradas.size, rango, preset, tipoFiltro, comprobanteIdFocus) {
         derivedStateOf {
+            val focusId = comprobanteIdFocus?.trim().orEmpty()
+            if (focusId.isNotBlank()) {
+                val doc = filtradas.firstOrNull()
+                return@derivedStateOf if (doc != null) {
+                    "Comprobante vinculado · ${doc.etiquetaCompleta}"
+                } else {
+                    "Comprobante vinculado · no encontrado en el listado"
+                }
+            }
             val rangoActual = rango
             val periodo = when {
                 preset == PresetFecha.TODOS || rangoActual == null -> "todos los periodos"
                 rangoActual.first == rangoActual.second -> formatearDiaElegante(rangoActual.first)
                 else -> formatearRangoElegante(rangoActual.first, rangoActual.second)
             }
-            "${filtradas.size} documento(s) · $periodo"
+            val tipo = LeyendaTiposComprobante.find { it.siglas == tipoFiltro }?.etiquetaCorta
+            buildString {
+                append("${filtradas.size} documento(s) · $periodo")
+                if (tipo != null) append(" · $tipo")
+            }
         }
     }
 
@@ -262,23 +311,66 @@ fun ComprobantesEmitidosScreen(
                             Column(
                                 Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                             ) {
-                                FiltroFechaEmitidosCard(
-                                    rango = rango,
-                                    preset = preset,
-                                    onPreset = { p ->
-                                        preset = p
-                                        if (p != PresetFecha.FECHA) mostrarDatePicker = false
-                                    },
-                                    onElegirFecha = {
-                                        preset = PresetFecha.FECHA
-                                        mostrarDatePicker = true
-                                    },
-                                )
-                                Spacer(Modifier.height(10.dp))
-                                CatalogoBusquedaBar(
-                                    value = busqueda,
-                                    onValueChange = { busqueda = it },
-                                )
+                                if (!comprobanteIdFocus.isNullOrBlank()) {
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = C.accent.copy(alpha = 0.1f),
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text(
+                                                    "Vista filtrada",
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = C.accent,
+                                                )
+                                                Text(
+                                                    "Mostrando solo el comprobante vinculado al movimiento",
+                                                    fontSize = 11.sp,
+                                                    color = C.textSecondary,
+                                                )
+                                            }
+                                            if (onComprobanteFocusClear != null) {
+                                                TextButton(onClick = onComprobanteFocusClear) {
+                                                    Text("Ver todos", color = C.accent)
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    FiltroFechaEmitidosCard(
+                                        rango = rango,
+                                        preset = preset,
+                                        onPreset = { p ->
+                                            preset = p
+                                            if (p != PresetFecha.FECHA) mostrarDatePicker = false
+                                        },
+                                        onElegirFecha = {
+                                            preset = PresetFecha.FECHA
+                                            mostrarDatePicker = true
+                                        },
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    CatalogoBusquedaBar(
+                                        value = busqueda,
+                                        onValueChange = { busqueda = it },
+                                    )
+                                    if (porFecha.isNotEmpty()) {
+                                        Spacer(Modifier.height(12.dp))
+                                        LeyendaTiposComprobanteRow(
+                                            seleccionado = tipoFiltro,
+                                            onSeleccionar = { siglas ->
+                                                tipoFiltro = if (tipoFiltro == siglas) null else siglas
+                                            },
+                                        )
+                                    }
+                                }
                             }
                         }
                         if (filtradas.isEmpty()) {
@@ -288,10 +380,15 @@ fun ComprobantesEmitidosScreen(
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
-                                        if (busqueda.isNotBlank()) {
-                                            "Sin resultados para tu búsqueda"
-                                        } else {
-                                            "No hay comprobantes en este periodo"
+                                        when {
+                                            !comprobanteIdFocus.isNullOrBlank() ->
+                                                "No se encontró el comprobante vinculado"
+                                            busqueda.isNotBlank() ->
+                                                "Sin resultados para tu búsqueda"
+                                            tipoFiltro != null ->
+                                                "No hay comprobantes de este tipo en el periodo"
+                                            else ->
+                                                "No hay comprobantes en este periodo"
                                         },
                                         color = C.textSecondary,
                                         fontWeight = FontWeight.Medium,
@@ -330,6 +427,63 @@ fun ComprobantesEmitidosScreen(
             detalle = null
         },
     )
+}
+
+@Composable
+private fun LeyendaTiposComprobanteRow(
+    seleccionado: String?,
+    onSeleccionar: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LeyendaTiposComprobante.forEach { tipo ->
+            val activo = seleccionado == tipo.siglas
+            FilterChip(
+                selected = activo,
+                onClick = { onSeleccionar(tipo.siglas) },
+                label = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (activo) Color.White else tipo.accent,
+                                    CircleShape,
+                                ),
+                        )
+                        Text(
+                            tipo.siglas,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            tipo.etiquetaCorta,
+                            fontSize = 12.sp,
+                        )
+                    }
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = tipo.accent,
+                    selectedLabelColor = Color.White,
+                    containerColor = tipo.soft.copy(alpha = 0.55f),
+                    labelColor = tipo.title,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = activo,
+                    borderColor = tipo.accent.copy(alpha = 0.45f),
+                    selectedBorderColor = tipo.accent,
+                ),
+            )
+        }
+    }
 }
 
 @Composable
@@ -440,6 +594,7 @@ private fun ComprobanteEmitidoCard(
     var descargandoPdfFormato by remember(doc.id) { mutableStateOf<PdfFormato?>(null) }
     var reenviando by remember(doc.id) { mutableStateOf(false) }
     val estadoColor = Color(doc.estado.colorArgb())
+    val tipoPalette = doc.tipoPalette()
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -447,11 +602,23 @@ private fun ComprobanteEmitidoCard(
         colors = CardDefaults.cardColors(containerColor = C.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
-        Column(
+        Row(
             Modifier
-                .clickable(onClick = onClick)
-                .padding(16.dp),
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min),
         ) {
+            Box(
+                Modifier
+                    .width(6.dp)
+                    .fillMaxHeight()
+                    .background(tipoPalette.accent),
+            )
+            Column(
+                Modifier
+                    .weight(1f)
+                    .clickable(onClick = onClick)
+                    .padding(16.dp),
+            ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -464,13 +631,13 @@ private fun ComprobanteEmitidoCard(
                     Surface(
                         modifier = Modifier.size(40.dp),
                         shape = CircleShape,
-                        color = C.accentSoft,
+                        color = tipoPalette.soft,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                Icons.Default.Description,
+                                tipoPalette.icon,
                                 contentDescription = null,
-                                tint = C.accent,
+                                tint = tipoPalette.accent,
                                 modifier = Modifier.size(20.dp),
                             )
                         }
@@ -485,8 +652,6 @@ private fun ComprobanteEmitidoCard(
                         )
                         Text(
                             buildString {
-                                append(doc.etiquetaTipo())
-                                append(' ')
                                 append(doc.etiquetaCompleta)
                                 doc.cliente?.etiquetaDocumento?.let { docEt ->
                                     append(" · ")
@@ -494,7 +659,7 @@ private fun ComprobanteEmitidoCard(
                                 }
                             },
                             fontSize = 12.sp,
-                            color = C.accent,
+                            color = tipoPalette.title,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
@@ -691,6 +856,7 @@ private fun ComprobanteEmitidoCard(
                         }
                     }
                 }
+            }
             }
         }
     }

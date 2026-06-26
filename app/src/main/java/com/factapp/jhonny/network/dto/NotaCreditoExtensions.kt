@@ -9,21 +9,47 @@ import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.model.InvoiceTipoDoc
 import com.factapp.jhonny.network.dto.model.LineaCatalogoItem
 import com.factapp.jhonny.network.dto.model.SaleDetail
+import com.factapp.jhonny.network.dto.model.estaDisponibleParaNotaCredito
 
 /** Solo facturas electrónicas pueden ser afectadas por una nota de crédito. */
 fun Invoice.esAfectablePorNotaCredito(): Boolean =
-    esListableComoDocumentoAfectado(soloFacturas = true) && details.isNotEmpty()
+    esListableComoDocumentoAfectado(soloFacturas = true) &&
+        details.any { it.estaDisponibleParaNotaCredito() }
 
 fun Invoice.esListableComoDocumentoAfectado(soloFacturas: Boolean): Boolean {
     if (!estadoPermiteNotaSobreDocumento()) return false
     return if (soloFacturas) esFacturaListable() else esFacturaListable() || esBoletaListable()
 }
 
-private fun Invoice.esFacturaListable(): Boolean =
-    tipoDoc == InvoiceTipoDoc.COD_FACTURA ||
+private fun Invoice.esNotaCreditoListable(): Boolean =
+    tipoDoc == InvoiceTipoDoc.COD_NOTA_CREDITO ||
+        tipo == InvoiceTipoDoc.NOTA_CREDITO ||
+        tipoDoc.equals(InvoiceTipoDoc.NOTA_CREDITO, ignoreCase = true) ||
+        serie.uppercase().startsWith("FC")
+
+private fun Invoice.esNotaDebitoListable(): Boolean =
+    tipoDoc == InvoiceTipoDoc.COD_NOTA_DEBITO ||
+        tipo == InvoiceTipoDoc.NOTA_DEBITO ||
+        tipoDoc.equals(InvoiceTipoDoc.NOTA_DEBITO, ignoreCase = true) ||
+        serie.uppercase().startsWith("FD")
+
+private fun Invoice.esGuiaListable(): Boolean =
+    tipo == InvoiceTipoDoc.GUIA_EMISION ||
+        tipo == InvoiceTipoDoc.GUIA_TRANSPORTISTA ||
+        tipoDoc == InvoiceTipoDoc.COD_GUIA ||
+        tipoDoc == InvoiceTipoDoc.COD_GUIA_TRANSPORTISTA ||
+        serie.uppercase().startsWith("T") ||
+        serie.uppercase().startsWith("V")
+
+private fun Invoice.esFacturaListable(): Boolean {
+    if (esBoletaListable() || esNotaCreditoListable() || esNotaDebitoListable() || esGuiaListable()) {
+        return false
+    }
+    return tipoDoc == InvoiceTipoDoc.COD_FACTURA ||
         tipo == InvoiceTipoDoc.FACTURA ||
         tipoDoc.equals(InvoiceTipoDoc.FACTURA, ignoreCase = true) ||
-        serie.uppercase().startsWith("F")
+        serie.uppercase().matches(Regex("^F\\d{3}$"))
+}
 
 private fun Invoice.esBoletaListable(): Boolean =
     tipoDoc == InvoiceTipoDoc.COD_BOLETA ||
@@ -44,9 +70,9 @@ fun List<Invoice>.aptosParaNotaCredito(): List<Invoice> =
 fun List<Invoice>.listablesComoDocumentoAfectado(soloFacturas: Boolean): List<Invoice> =
     filter { it.esListableComoDocumentoAfectado(soloFacturas) }
 
-/** Facturas y boletas aceptadas pueden ser afectadas por una nota de débito. */
+/** Solo facturas electrónicas pueden ser afectadas por una nota de débito. */
 fun Invoice.esAfectablePorNotaDebito(): Boolean =
-    esListableComoDocumentoAfectado(soloFacturas = false) && details.isNotEmpty()
+    esListableComoDocumentoAfectado(soloFacturas = true) && details.isNotEmpty()
 
 fun List<Invoice>.aptosParaNotaDebito(): List<Invoice> =
     filter { it.esAfectablePorNotaDebito() }
@@ -59,8 +85,7 @@ fun List<Invoice>.filtrarComprobantesAfectados(
     var lista = listablesComoDocumentoAfectado(soloFacturas)
     val doc = docCliente.filter { it.isDigit() }
     if (doc.length in listOf(8, 11)) {
-        val porDoc = lista.filter { it.coincideDocReceptor(doc) }
-        if (porDoc.isNotEmpty()) lista = porDoc
+        lista = lista.filter { it.coincideDocReceptor(doc) }
     }
     val q = query.trim()
     if (q.isNotBlank()) {
@@ -131,6 +156,7 @@ fun SaleDetail.aLineaCatalogoItem(
     val item = catalogo.find { it.id == catId }
     val base = LineaCatalogoItem(
         catalogItemId = catId,
+        saleDetailId = id?.takeIf { it.isNotBlank() },
         nombre = nombre?.takeIf { it.isNotBlank() } ?: descripcion,
         descripcion = descripcion,
         unidad = unidad,
@@ -143,18 +169,16 @@ fun SaleDetail.aLineaCatalogoItem(
         productoSerie = productoSerie,
         catalogItem = item,
     )
-    return if (productoSerie != null) {
-        base.copy(series = listOf(productoSerie))
-    } else {
-        base
-    }
+    return base
 }
 
 fun Invoice.aLineasParaAcreditar(
     catalogo: List<CatalogItem>,
     almacenId: String? = null,
 ): List<LineaCatalogoItem> =
-    details.mapNotNull { it.aLineaCatalogoItem(catalogo, almacenId) }
+    details
+        .filter { it.estaDisponibleParaNotaCredito() }
+        .mapNotNull { it.aLineaCatalogoItem(catalogo, almacenId) }
 
 fun List<LineaCatalogoItem>.prepararParaMotivoNc(codigoMotivo: String?): List<LineaCatalogoItem> =
     if (!MotivosNotaCreditoSunat.esAcreditacionPorMonto(codigoMotivo)) {

@@ -4,6 +4,9 @@ import com.factapp.jhonny.network.dto.ordenadosPorFechaEmisionReciente
 import com.factapp.jhonny.network.dto.model.Invoice
 import com.factapp.jhonny.network.dto.model.SeriesComprobanteItem
 import com.factapp.jhonny.network.dto.request.EmitirComprobanteRequest
+import com.factapp.jhonny.network.dto.request.GreBajaRequest
+import com.factapp.jhonny.network.dto.request.GreEventoRequest
+import com.factapp.jhonny.network.dto.request.GreOperacionResponse
 import java.time.LocalDate
 
 object ComprobanteRepository {
@@ -24,6 +27,35 @@ object ComprobanteRepository {
         RetrofitClient.api.reenviarComprobante(companyRuc, comprobanteId, bearer(authToken)).normalizado()
     }
 
+    suspend fun registrarGreEvento(
+        companyRuc: String,
+        token: String?,
+        comprobanteId: String,
+        codigoEvento: String,
+        detalle: String? = null,
+    ): Result<GreOperacionResponse> = apiCall(companyRuc, token, "registrar evento GRE") { authToken ->
+        RetrofitClient.api.registrarGreEvento(
+            companyRuc,
+            comprobanteId,
+            bearer(authToken),
+            GreEventoRequest(codigoEvento = codigoEvento, detalle = detalle),
+        )
+    }
+
+    suspend fun comunicarGreBaja(
+        companyRuc: String,
+        token: String?,
+        comprobanteId: String,
+        motivo: String,
+    ): Result<GreOperacionResponse> = apiCall(companyRuc, token, "comunicar baja GRE") { authToken ->
+        RetrofitClient.api.comunicarGreBaja(
+            companyRuc,
+            comprobanteId,
+            bearer(authToken),
+            GreBajaRequest(motivo = motivo),
+        )
+    }
+
     suspend fun listarEmitidos(
         companyRuc: String,
         token: String?,
@@ -41,10 +73,15 @@ object ComprobanteRepository {
     suspend fun listarCompras(
         companyRuc: String,
         token: String?,
+        desde: java.time.LocalDate? = null,
+        hasta: java.time.LocalDate? = null,
     ): Result<List<Invoice>> = apiCall(companyRuc, token, "consultar compras") { authToken ->
-        RetrofitClient.api.listarCompras(companyRuc, bearer(authToken))
-            .map { it.normalizado() }
-            .ordenadosPorFechaEmisionReciente()
+        RetrofitClient.api.listarCompras(
+            companyRuc,
+            bearer(authToken),
+            desde?.toString(),
+            hasta?.toString(),
+        ).map { it.normalizado() }.ordenadosPorFechaEmisionReciente()
     }
 
     suspend fun listarSeriesEntregadas(

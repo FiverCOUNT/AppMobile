@@ -502,13 +502,13 @@ fun RegistrarIngresoSheet(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.height(220.dp),
                     ) {
-                        items(lineas, key = { it.requireItem().id }) { linea ->
+                        items(lineas, key = { it.lineaId }) { linea ->
                             LineaIngresoEditor(
                                 linea = linea,
                                 esDevolucion = esDevolucion,
                                 maxCantidadDevolucion = cantidadPendienteMap[linea.requireItem().id],
                                 onCantidadChange = { nueva ->
-                                    val idx = lineas.indexOfFirst { it.requireItem().id == linea.requireItem().id }
+                                    val idx = lineas.indexOfFirst { it.lineaId == linea.lineaId }
                                     if (idx >= 0) {
                                         lineas[idx] = if (linea.requireItem().usaSeriesInventario) {
                                             lineas[idx]
@@ -528,7 +528,7 @@ fun RegistrarIngresoSheet(
                                     lineaSeriesDevolucionId = linea.requireItem().id
                                 },
                                 onEliminar = {
-                                    lineas.removeAll { it.requireItem().id == linea.requireItem().id }
+                                    lineas.removeAll { it.lineaId == linea.lineaId }
                                 },
                             )
                         }
@@ -600,7 +600,12 @@ fun RegistrarIngresoSheet(
             busqueda = ""
         },
         onItemSeleccionado = { item ->
-            if (lineas.none { it.requireItem().id == item.id }) {
+            val yaExiste = if (item.usaSeriesInventario) {
+                lineas.any { it.catalogItemId == item.id && it.productoSerie == null }
+            } else {
+                lineas.any { it.catalogItemId == item.id }
+            }
+            if (!yaExiste) {
                 lineas += item.aLineaCatalogoItem(
                     cantidad = if (item.usaSeriesInventario) 0.0 else 1.0,
                     almacenId = almacenId,
@@ -628,18 +633,20 @@ fun RegistrarIngresoSheet(
             visible = lineaEscaneoSerie != null,
             companyRuc = companyRuc,
             catalogItem = lineaEscaneoSerie?.catalogItem,
-            seriesIniciales = lineaEscaneoSerie?.series.orEmpty(),
+            seriesIniciales = lineas
+                .filter { it.catalogItemId == lineaEscaneoSerie?.catalogItemId }
+                .mapNotNull { it.productoSerie },
             onDismiss = { lineaEscaneoSerieId = null },
             onConfirmar = { series ->
-                val idx = lineas.indexOfFirst { it.requireItem().id == lineaEscaneoSerie?.requireItem()?.id }
-                if (idx >= 0) {
-                    lineas[idx] = lineas[idx].copy(
-                        series = series,
-                        numerosSerie = series.map { it.numeroSerie },
-                        almacenId = almacenId,
-                        cantidad = series.size.toDouble(),
-                    )
+                val item = lineaEscaneoSerie?.catalogItem ?: return@EscaneoMasivoSeriesSheet
+                val catalogId = item.id
+                val sinEste = lineas.filter { it.catalogItemId != catalogId }
+                val nuevas = series.map { serie ->
+                    item.aLineaCatalogoItem(cantidad = 1.0, almacenId = almacenId, productoSerie = serie)
+                        .copy(lineaId = java.util.UUID.randomUUID().toString())
                 }
+                lineas.clear()
+                lineas.addAll(sinEste + nuevas)
                 lineaEscaneoSerieId = null
             },
         )
@@ -650,19 +657,20 @@ fun RegistrarIngresoSheet(
         visible = lineaSeriesDevolucion != null,
         catalogItem = lineaSeriesDevolucion?.catalogItem,
         seriesEntregadas = seriesEntregadasMap[lineaSeriesDevolucion?.requireItem()?.id].orEmpty(),
-        seriesIniciales = lineaSeriesDevolucion?.series.orEmpty(),
+        seriesIniciales = lineas
+            .filter { it.catalogItemId == lineaSeriesDevolucion?.catalogItemId }
+            .mapNotNull { it.productoSerie },
         onDismiss = { lineaSeriesDevolucionId = null },
         onConfirmar = { series ->
-            val catalogId = lineaSeriesDevolucion?.requireItem()?.id ?: return@DevolucionSeriesSheet
-            val idx = lineas.indexOfFirst { it.requireItem().id == catalogId }
-            if (idx >= 0) {
-                lineas[idx] = lineas[idx].copy(
-                    series = series,
-                    numerosSerie = series.map { it.numeroSerie },
-                    almacenId = almacenId,
-                    cantidad = series.size.toDouble(),
-                )
+            val item = lineaSeriesDevolucion?.catalogItem ?: return@DevolucionSeriesSheet
+            val catalogId = item.id
+            val sinEste = lineas.filter { it.catalogItemId != catalogId }
+            val nuevas = series.map { serie ->
+                item.aLineaCatalogoItem(cantidad = 1.0, almacenId = almacenId, productoSerie = serie)
+                    .copy(lineaId = java.util.UUID.randomUUID().toString())
             }
+            lineas.clear()
+            lineas.addAll(sinEste + nuevas)
             lineaSeriesDevolucionId = null
         },
     )
@@ -948,7 +956,9 @@ private fun LineaIngresoEditor(
                     text = buildString {
                         item.codigo?.let { append("$it · ") }
                         if (item.usaSeriesInventario) {
-                            append("${linea.series.size} series · ")
+                            val serieLabel = linea.productoSerie?.numeroSerie?.let { "Serie: $it" }
+                                ?: "Sin serie · toca para elegir"
+                            append("$serieLabel · ")
                             append(if (esDevolucion) "Elegir series entregadas" else "Producto serializado")
                         } else {
                             if (esDevolucion && maxCantidadDevolucion != null) {
